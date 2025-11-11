@@ -6408,6 +6408,15 @@ if (! function_exists('reeid_translate_via_openai_with_slug')) {
                     $translated_map
                 );
             } elseif ($editor === 'elementor') {
+            /* Elementor schema-safe pipeline */
+            $post_id = isset($_POST["post_id"]) ? (int) $_POST["post_id"] : 0; 
+            $source  = isset($_POST["source"])  ? sanitize_text_field($_POST["source"])  : ""; 
+            $target  = isset($_POST["target"])  ? sanitize_text_field($_POST["target"])  : ""; 
+            $tone    = isset($_POST["tone"])    ? sanitize_text_field($_POST["tone"])    : ""; 
+            $extra   = isset($_POST["prompt"])  ? wp_kses_post($_POST["prompt"])        : ""; 
+            $res = reeid_elementor_walk_translate_and_commit($post_id, $source, $target, $tone, $extra); 
+            if(!$res["ok"]) { wp_send_json_error($res); } 
+            wp_send_json_success($res);
                 // Elementor: use SAME resolved languages (no admin override in single mode)
                 $out = reeid_translate_html_with_openai($content, $source_lang, $target_lang, 'elementor', 'neutral');
                 if (is_wp_error($out)) $out = $content;
@@ -14893,5 +14902,77 @@ if (!function_exists('reeid_elementor_commit_post_safe')) {
             } catch (\Throwable $e) { /* ignore */ }
         }
         return true;
+    }
+}
+
+/* ========================================================================
+ * SECTION 17.E.1: Elementor — Text-only translate & commit (uses walkers)
+ * - Collects ONLY text controls
+ * - Translates each value (BYOK)
+ * - Reassembles JSON without touching schema
+ * - Saves safely and updates CSS
+ * ===================================================================== */
+if (!function_exists('reeid_elementor_walk_translate_and_commit')) {
+    /**
+     * @param int    $post_id
+     * @param string $source two-letter/locale your pipeline already uses
+     * @param string $target two-letter/locale
+     * @param string $tone   optional tone/style your pipeline already supports
+     * @param string $extra  optional extra instructions (custom prompt additive)
+     * @return array { ok:bool, count:int, msg:string }
+     */
+    function reeid_elementor_walk_translate_and_commit(int $post_id, string $source, string $target, string $tone = '', string $extra = ''): array
+    {
+        $orig_json = (string) get_post_meta($post_id, '_elementor_data', true);
+        $decoded   = json_decode($orig_json, true);
+        if (!is_array($decoded)) {
+            return ['ok'=>false, 'count'=>0, 'msg'=>'no_elementor_json'];
+        }
+
+        // Normalize document root & collect text
+        $is_doc   = false;
+        $root     = rt_el_root_ref($decoded, $is_doc);
+        $nodes    = isset($root['elements']) && is_array($root['elements']) ? $root['elements'] : [];
+        $flat_map = [];
+        rt_el_walk_collect($nodes, [], $flat_map);
+
+        if (empty($flat_map)) {
+            // Still save as-is to keep CSS/doc stable
+            reeid_elementor_commit_post_safe($post_id, $orig_json);
+            return ['ok'=>true, 'count'=>0, 'msg'=>'no_text_controls'];
+        }
+
+        // Deduplicate identical strings to reduce API calls
+        $uniq_in   = array_values(array_unique(array_values($flat_map)));
+        $uniq_out  = [];
+
+        // Translate one-by-one via existing BYOK translator
+        foreach ($uniq_in as $str) {
+            // Prefer your existing helper if present (keeps all repo safeguards)
+            if (function_exists('reeid_translate_html_with_openai')) {
+                $tr = (string) reeid_translate_html_with_openai($str, $source, $target, $tone, $extra);
+            } else {
+                // Fallback: identity (safety). You can wire another engine here later.
+                $tr = $str;
+            }
+            $uniq_out[$str] = $tr;
+        }
+
+        // Rebuild translated map preserving keys
+        $translated_map = [];
+        foreach ($flat_map as $k => $v) {
+            $translated_map[$k] = $uniq_out[$v];
+        }
+
+        // Assemble and guard
+        $new_json = rt_el_assemble_with_map($orig_json, $translated_map);
+        if (!rt_el_schema_guard_diff($orig_json, $new_json)) {
+            return ['ok'=>false, 'count'=>count($flat_map), 'msg'=>'schema_guard_block'];
+        }
+
+        // Commit + CSS
+        reeid_elementor_commit_post_safe($post_id, $new_json);
+
+        return ['ok'=>true, 'count'=>count($flat_map), 'msg'=>'saved'];
     }
 }
