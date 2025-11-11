@@ -14785,53 +14785,29 @@ if (!function_exists('reeid_hreflang_dedupe_buffer')) {
     }, 999);
 }
 
-
 /* ========================================================================
  * SECTION 17.E: Elementor — Schema-Safe Text Walkers + Safe Commit (BYOK)
- * Purpose: translate ONLY text controls; never touch schema keys like elType,
- * widgetType, elements, id, etc. Prevents localized schema (e.g., 容器/小部件).
  * ===================================================================== */
-
 if (!function_exists('rt_el_root_ref')) {
-    /**
-     * Return canonical root ref: Elementor stores either a Document array
-     * (keys: 'elements', 'settings', 'version', etc.) or a raw elements array.
-     * We preserve the original shape for re-save.
-     */
     function rt_el_root_ref($decoded, &$is_document): array {
         $is_document = is_array($decoded) && array_key_exists('elements', $decoded) && array_key_exists('version', $decoded);
-        if ($is_document) return $decoded;              // associative document
-        if (is_array($decoded)) return ['elements'=>$decoded, '__rt_doc_like'=>false]; // elements array
+        if ($is_document) return $decoded;
+        if (is_array($decoded)) return ['elements'=>$decoded, '__rt_doc_like'=>false];
         return ['elements'=>[], '__rt_doc_like'=>false];
     }
 }
-
 if (!function_exists('rt_el_is_text_key')) {
-    /**
-     * Whitelist common text-like control keys. Extend over time.
-     */
     function rt_el_is_text_key(string $key): bool {
-        static $keys = [
-            'title','text','editor','content','button_text','label','description',
-            'placeholder','headline','sub_title','subtitle','caption','html',
-            'price','before_text','after_text','list_title','list_text',
-        ];
+        static $keys = ['title','text','editor','content','button_text','label','description','placeholder','headline','sub_title','subtitle','caption','html','price','before_text','after_text','list_title','list_text'];
         return in_array($key, $keys, true);
     }
 }
-
 if (!function_exists('rt_el_walk_collect')) {
-    /**
-     * Collect only text controls into a flat path => value map.
-     */
     function rt_el_walk_collect(array $nodes, array $path, array &$map): void {
         foreach ($nodes as $node) {
             if (!is_array($node)) continue;
-            $id   = isset($node['id']) ? (string)$node['id'] : '';
-            $kind = isset($node['elType']) ? (string)$node['elType'] : ''; // NEVER translate
+            $id = isset($node['id']) ? (string)$node['id'] : '';
             $p = array_merge($path, [$id !== '' ? $id : 'node']);
-
-            // settings
             if (isset($node['settings']) && is_array($node['settings'])) {
                 foreach ($node['settings'] as $k => $v) {
                     if (is_string($v) && rt_el_is_text_key((string)$k)) {
@@ -14839,7 +14815,6 @@ if (!function_exists('rt_el_walk_collect')) {
                     }
                 }
             }
-            // recurse children
             foreach (['elements','children','_children'] as $kids) {
                 if (isset($node[$kids]) && is_array($node[$kids])) {
                     rt_el_walk_collect($node[$kids], array_merge($p, [$kids]), $map);
@@ -14848,24 +14823,17 @@ if (!function_exists('rt_el_walk_collect')) {
         }
     }
 }
-
 if (!function_exists('rt_el_walk_replace')) {
-    /**
-     * Replace text controls by path using translated map (no schema changes).
-     */
     function rt_el_walk_replace(array &$nodes, array $path, array $map): void {
         foreach ($nodes as &$node) {
             if (!is_array($node)) continue;
             $id = isset($node['id']) ? (string)$node['id'] : 'node';
             $p = array_merge($path, [$id]);
-
             if (isset($node['settings']) && is_array($node['settings'])) {
                 foreach ($node['settings'] as $k => $v) {
                     if (is_string($v) && rt_el_is_text_key((string)$k)) {
                         $key = implode('/', array_merge($p, ['settings', (string)$k]));
-                        if (array_key_exists($key, $map)) {
-                            $node['settings'][$k] = (string)$map[$key];
-                        }
+                        if (array_key_exists($key, $map)) $node['settings'][$k] = (string)$map[$key];
                     }
                 }
             }
@@ -14878,23 +14846,14 @@ if (!function_exists('rt_el_walk_replace')) {
         unset($node);
     }
 }
-
 if (!function_exists('rt_el_assemble_with_map')) {
-    /**
-     * Given original JSON string, return JSON with only text swapped.
-     * Preserves original shape (document vs array).
-     */
     function rt_el_assemble_with_map(string $json, array $translated_map): string {
         $decoded = json_decode($json, true);
         $is_document = false;
         $root = rt_el_root_ref($decoded, $is_document);
-
         $nodes =& $root['elements'];
         if (!is_array($nodes)) $nodes = [];
-
         rt_el_walk_replace($nodes, [], $translated_map);
-
-        // restore original shape
         if ($is_document && isset($root['version'])) {
             unset($root['__rt_doc_like']);
             return wp_json_encode($root, JSON_UNESCAPED_UNICODE);
@@ -14902,62 +14861,37 @@ if (!function_exists('rt_el_assemble_with_map')) {
         return wp_json_encode($root['elements'], JSON_UNESCAPED_UNICODE);
     }
 }
-
 if (!function_exists('rt_el_schema_guard_diff')) {
-    /**
-     * Guardrail: ensure only settings/* changed. Returns true if clean.
-     */
     function rt_el_schema_guard_diff(string $orig_json, string $new_json): bool {
-        $o = json_decode($orig_json, true);
-        $n = json_decode($new_json, true);
+        $o = json_decode($orig_json, true); $n = json_decode($new_json, true);
         if (!is_array($o) || !is_array($n)) return false;
-
         $flatten = function($arr, $prefix='') use (&$flatten) {
             $out = [];
             foreach ($arr as $k=>$v) {
                 $path = $prefix === '' ? (string)$k : $prefix.'/'.$k;
-                if (is_array($v)) $out += $flatten($v, $path);
-                else $out[$path] = $v;
+                if (is_array($v)) $out += $flatten($v, $path); else $out[$path] = $v;
             }
             return $out;
         };
         $fo = $flatten($o); $fn = $flatten($n);
         foreach ($fn as $k=>$v) {
-            if (!array_key_exists($k, $fo)) {
-                if (strpos($k, '/settings/') === false) return false;
-            } else {
-                if ($fo[$k] !== $v && strpos($k, '/settings/') === false) return false;
-            }
+            if (!array_key_exists($k, $fo) && strpos($k, '/settings/') === false) return false;
+            if (array_key_exists($k, $fo) && $fo[$k] !== $v && strpos($k, '/settings/') === false) return false;
         }
         return true;
     }
 }
-
 if (!function_exists('reeid_elementor_commit_post_safe')) {
-    /**
-     * Save _elementor_data safely and refresh CSS only when a Document exists.
-     */
     function reeid_elementor_commit_post_safe(int $post_id, string $elementor_json): bool {
         update_post_meta($post_id, '_elementor_data', $elementor_json);
         update_post_meta($post_id, '_elementor_edit_mode', 'builder');
-        if (!metadata_exists('post', $post_id, '_elementor_page_settings')) {
-            update_post_meta($post_id, '_elementor_page_settings', []);
-        }
-
-        // Attempt CSS regen if Elementor document can be loaded
+        if (!metadata_exists('post', $post_id, '_elementor_page_settings')) update_post_meta($post_id, '_elementor_page_settings', []);
         if (class_exists('\Elementor\Plugin')) {
             try {
-                $plugin = \Elementor\Plugin::$instance;
-                $doc    = $plugin->documents->get($post_id);
-                if ($doc) {
-                    $css = new \Elementor\Core\Files\CSS\Post($post_id);
-                    $css->update();
-                }
-            } catch (\Throwable $e) {
-                // quietly ignore CSS failures to avoid fatals on non-docs
-            }
+                $doc = \Elementor\Plugin::$instance->documents->get($post_id);
+                if ($doc) { $css = new \Elementor\Core\Files\CSS\Post($post_id); $css->update(); }
+            } catch (\Throwable $e) { /* ignore */ }
         }
         return true;
     }
 }
-
