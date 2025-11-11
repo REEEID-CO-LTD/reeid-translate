@@ -6408,6 +6408,15 @@ if (! function_exists('reeid_translate_via_openai_with_slug')) {
                     $translated_map
                 );
             } elseif ($editor === 'elementor') {
+            /* Elementor schema-safe pipeline v2 */
+            $post_id = isset($_POST["post_id"]) ? (int) $_POST["post_id"] : 0; 
+            $source  = isset($_POST["source"])  ? sanitize_text_field($_POST["source"])  : ""; 
+            $target  = isset($_POST["target"])  ? sanitize_text_field($_POST["target"])  : ""; 
+            $tone    = isset($_POST["tone"])    ? sanitize_text_field($_POST["tone"])    : ""; 
+            $extra   = isset($_POST["prompt"])  ? wp_kses_post($_POST["prompt"])        : ""; 
+            $res = reeid_elementor_walk_translate_and_commit_v2($post_id, $source, $target, $tone, $extra); 
+            if(!$res["ok"]) { wp_send_json_error($res); } 
+            wp_send_json_success($res);
             /* Elementor schema-safe pipeline */
             $post_id = isset($_POST["post_id"]) ? (int) $_POST["post_id"] : 0; 
             $source  = isset($_POST["source"])  ? sanitize_text_field($_POST["source"])  : ""; 
@@ -14795,7 +14804,6 @@ if (!function_exists('reeid_hreflang_dedupe_buffer')) {
 }
 
 /* ========================================================================
- * /* ========================================================================
  * SECTION 17.E: Elementor — Schema-Safe Text Walkers + Safe Commit (BYOK)
  * ===================================================================== */
 if (!function_exists('rt_el_root_ref')) {
@@ -14808,13 +14816,8 @@ if (!function_exists('rt_el_root_ref')) {
 }
 if (!function_exists('rt_el_is_text_key')) {
     function rt_el_is_text_key(string $key): bool {
-        $k = strtolower((string)$key);
-        if ($k === '' || $k[0] === '_') return false; // internal/meta
-        // obvious non-text controls
-        if (preg_match('~^(url|link|image|background|bg_|icon|html_tag|alignment|align|size|width|height|color|colors|typography|font|letter|line_height|border|padding|margin|box_shadow|object_|z_index|position|hover_|motion_fx|transition|duration)$~i', $k)) {
-            return false;
-        }
-        return true; // allow other string settings (value guard below)
+        static $keys = ['title','text','editor','content','button_text','label','description','placeholder','headline','sub_title','subtitle','caption','html','price','before_text','after_text','list_title','list_text'];
+        return in_array($key, $keys, true);
     }
 }
 if (!function_exists('rt_el_walk_collect')) {
@@ -14822,14 +14825,12 @@ if (!function_exists('rt_el_walk_collect')) {
         foreach ($nodes as $node) {
             if (!is_array($node)) continue;
             $id = isset($node['id']) ? (string)$node['id'] : '';
-            $p  = array_merge($path, [$id !== '' ? $id : 'node']);
+            $p = array_merge($path, [$id !== '' ? $id : 'node']);
             if (isset($node['settings']) && is_array($node['settings'])) {
                 foreach ($node['settings'] as $k => $v) {
-                    if (!is_string($v) || !rt_el_is_text_key((string)$k)) continue;
-                    $vv = trim($v);
-                    // skip non-texty values (colors, urls, file paths, pure units)
-                    if ($vv === '' || preg_match('~^(#?[0-9a-f]{3,8}|var\(--|https?://|/wp-content/|[0-9]+(px|em|rem|%)$)~i', $vv)) continue;
-                    $map[implode('/', array_merge($p, ['settings', (string)$k]))] = $v;
+                    if (is_string($v) && rt_el_is_text_key((string)$k)) {
+                        $map[implode('/', array_merge($p, ['settings', (string)$k]))] = $v;
+                    }
                 }
             }
             foreach (['elements','children','_children'] as $kids) {
@@ -14845,12 +14846,13 @@ if (!function_exists('rt_el_walk_replace')) {
         foreach ($nodes as &$node) {
             if (!is_array($node)) continue;
             $id = isset($node['id']) ? (string)$node['id'] : 'node';
-            $p  = array_merge($path, [$id]);
+            $p = array_merge($path, [$id]);
             if (isset($node['settings']) && is_array($node['settings'])) {
                 foreach ($node['settings'] as $k => $v) {
-                    if (!is_string($v) || !rt_el_is_text_key((string)$k)) continue;
-                    $key = implode('/', array_merge($p, ['settings', (string)$k]));
-                    if (array_key_exists($key, $map)) $node['settings'][$k] = (string)$map[$key];
+                    if (is_string($v) && rt_el_is_text_key((string)$k)) {
+                        $key = implode('/', array_merge($p, ['settings', (string)$k]));
+                        if (array_key_exists($key, $map)) $node['settings'][$k] = (string)$map[$key];
+                    }
                 }
             }
             foreach (['elements','children','_children'] as $kids) {
@@ -14897,74 +14899,23 @@ if (!function_exists('rt_el_schema_guard_diff')) {
         return true;
     }
 }
-
-/* ========================================================================
- * SECTION 17.E.1: Elementor — Text-only translate & commit (walkers + rollback)
- * ===================================================================== */
-if (!function_exists('reeid_elementor_walk_translate_and_commit')) {
-    function reeid_elementor_walk_translate_and_commit(int $post_id, string $source, string $target, string $tone = '', string $extra = ''): array
-    {
-        $orig_json = (string) get_post_meta($post_id, '_elementor_data', true);
-        $decoded   = json_decode($orig_json, true);
-        if (!is_array($decoded)) return ['ok'=>false, 'count'=>0, 'msg'=>'no_elementor_json'];
-
-        $is_doc   = false;
-        $root     = rt_el_root_ref($decoded, $is_doc);
-        $nodes    = isset($root['elements']) && is_array($root['elements']) ? $root['elements'] : [];
-        $flat_map = [];
-        rt_el_walk_collect($nodes, [], $flat_map);
-
-        // Keep original for rollback
-        $orig_json_before = $orig_json;
-
-        if (empty($flat_map)) {
-            reeid_elementor_commit_post_safe($post_id, $orig_json);
-            return ['ok'=>true, 'count'=>0, 'msg'=>'no_text_controls'];
+if (!function_exists('reeid_elementor_commit_post_safe')) {
+    function reeid_elementor_commit_post_safe(int $post_id, string $elementor_json): bool {
+        update_post_meta($post_id, '_elementor_data', $elementor_json);
+        update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+        if (!metadata_exists('post', $post_id, '_elementor_page_settings')) update_post_meta($post_id, '_elementor_page_settings', []);
+        if (class_exists('\Elementor\Plugin')) {
+            try {
+                $doc = \Elementor\Plugin::$instance->documents->get($post_id);
+                if ($doc) { $css = new \Elementor\Core\Files\CSS\Post($post_id); $css->update(); }
+            } catch (\Throwable $e) { /* ignore */ }
         }
-
-        // Dedup + translate via existing BYOK translator
-        $uniq_in  = array_values(array_unique(array_values($flat_map)));
-        $uniq_out = [];
-        foreach ($uniq_in as $str) {
-            if (function_exists('reeid_translate_html_with_openai')) {
-                $tr = (string) reeid_translate_html_with_openai($str, $source, $target, $tone, $extra);
-            } else {
-                $tr = $str;
-            }
-            $trim = trim((string)$tr);
-            $looks_json = ($trim !== '' && ($trim[0] === '{' || $trim[0] === '['));
-            if ($trim === '' || $looks_json) $tr = $str; // safety
-            $uniq_out[$str] = $tr;
-        }
-
-        $translated_map = [];
-        foreach ($flat_map as $k => $v) $translated_map[$k] = $uniq_out[$v];
-
-        $new_json = rt_el_assemble_with_map($orig_json, $translated_map);
-        if (!rt_el_schema_guard_diff($orig_json, $new_json)) {
-            return ['ok'=>false, 'count'=>count($flat_map), 'msg'=>'schema_guard_block'];
-        }
-
-        // Tentative commit
-        reeid_elementor_commit_post_safe($post_id, $new_json);
-
-        // Render check; rollback if blank
-        try {
-            $html = class_exists('\Elementor\Plugin')
-                ? \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($post_id, false)
-                : '';
-        } catch (\Throwable $e) { $html = ''; }
-        $ok_render = (is_string($html) && strlen($html) > 0 && strpos($html, 'class="elementor') !== false);
-
-        if (!$ok_render) {
-            reeid_elementor_commit_post_safe($post_id, $orig_json_before);
-            return ['ok'=>false, 'count'=>count($flat_map), 'msg'=>'render_guard_rollback'];
-        }
-
-        return ['ok'=>true, 'count'=>count($flat_map), 'msg'=>'saved'];
+        return true;
     }
 }
-SECTION 17.E.1: Elementor — Text-only translate & commit (uses walkers)
+
+/* ========================================================================
+ * SECTION 17.E.1: Elementor — Text-only translate & commit (uses walkers)
  * - Collects ONLY text controls
  * - Translates each value (BYOK)
  * - Reassembles JSON without touching schema
@@ -15031,6 +14982,165 @@ if (!function_exists('reeid_elementor_walk_translate_and_commit')) {
         // Commit + CSS
         reeid_elementor_commit_post_safe($post_id, $new_json);
 
+        return ['ok'=>true, 'count'=>count($flat_map), 'msg'=>'saved'];
+    }
+}
+
+/* ========================================================================
+ * SECTION 99.E: Elementor — Schema-Safe Text Walkers v2 (append-only, rollback)
+ * ===================================================================== */
+if (!function_exists('rt2_el_is_text_key')) {
+    function rt2_el_is_text_key(string $key): bool {
+        $k = strtolower((string)$key);
+        if ($k === '' || $k[0] === '_') return false;
+        if (preg_match('~^(url|link|image|background|bg_|icon|html_tag|alignment|align|size|width|height|color|colors|typography|font|letter|line_height|border|padding|margin|box_shadow|object_|z_index|position|hover_|motion_fx|transition|duration)$~i', $k)) {
+            return false;
+        }
+        return true;
+    }
+}
+if (!function_exists('rt2_el_walk_collect')) {
+    function rt2_el_walk_collect(array $nodes, array $path, array &$map): void {
+        foreach ($nodes as $node) {
+            if (!is_array($node)) continue;
+            $id = isset($node['id']) ? (string)$node['id'] : '';
+            $p  = array_merge($path, [$id !== '' ? $id : 'node']);
+            if (isset($node['settings']) && is_array($node['settings'])) {
+                foreach ($node['settings'] as $k => $v) {
+                    if (!is_string($v) || !rt2_el_is_text_key((string)$k)) continue;
+                    $vv = trim($v);
+                    if ($vv === '' || preg_match('~^(#?[0-9a-f]{3,8}|var\(--|https?://|/wp-content/|[0-9]+(px|em|rem|%)$)~i', $vv)) continue;
+                    $map[implode('/', array_merge($p, ['settings', (string)$k]))] = $v;
+                }
+            }
+            foreach (['elements','children','_children'] as $kids) {
+                if (isset($node[$kids]) && is_array($node[$kids])) {
+                    rt2_el_walk_collect($node[$kids], array_merge($p, [$kids]), $map);
+                }
+            }
+        }
+    }
+}
+if (!function_exists('rt2_el_walk_replace')) {
+    function rt2_el_walk_replace(array &$nodes, array $path, array $map): void {
+        foreach ($nodes as &$node) {
+            if (!is_array($node)) continue;
+            $id = isset($node['id']) ? (string)$node['id'] : 'node';
+            $p  = array_merge($path, [$id]);
+            if (isset($node['settings']) && is_array($node['settings'])) {
+                foreach ($node['settings'] as $k => $v) {
+                    if (!is_string($v) || !rt2_el_is_text_key((string)$k)) continue;
+                    $key = implode('/', array_merge($p, ['settings', (string)$k]));
+                    if (array_key_exists($key, $map)) $node['settings'][$k] = (string)$map[$key];
+                }
+            }
+            foreach (['elements','children','_children'] as $kids) {
+                if (isset($node[$kids]) && is_array($node[$kids])) {
+                    rt2_el_walk_replace($node[$kids], array_merge($p, [$kids]), $map);
+                }
+            }
+        }
+        unset($node);
+    }
+}
+if (!function_exists('rt2_el_root_ref')) {
+    function rt2_el_root_ref($decoded, &$is_document): array {
+        $is_document = is_array($decoded) && array_key_exists('elements', $decoded) && array_key_exists('version', $decoded);
+        if ($is_document) return $decoded;
+        if (is_array($decoded)) return ['elements'=>$decoded, '__rt_doc_like'=>false];
+        return ['elements'=>[], '__rt_doc_like'=>false];
+    }
+}
+if (!function_exists('rt2_el_assemble_with_map')) {
+    function rt2_el_assemble_with_map(string $json, array $translated_map): string {
+        $decoded = json_decode($json, true);
+        $is_document = false;
+        $root = rt2_el_root_ref($decoded, $is_document);
+        $nodes =& $root['elements'];
+        if (!is_array($nodes)) $nodes = [];
+        rt2_el_walk_replace($nodes, [], $translated_map);
+        if ($is_document && isset($root['version'])) {
+            unset($root['__rt_doc_like']);
+            return wp_json_encode($root, JSON_UNESCAPED_UNICODE);
+        }
+        return wp_json_encode($root['elements'], JSON_UNESCAPED_UNICODE);
+    }
+}
+if (!function_exists('rt2_el_schema_guard_diff')) {
+    function rt2_el_schema_guard_diff(string $orig_json, string $new_json): bool {
+        $o = json_decode($orig_json, true); $n = json_decode($new_json, true);
+        if (!is_array($o) || !is_array($n)) return false;
+        $flatten = function($arr, $prefix='') use (&$flatten) {
+            $out = [];
+            foreach ($arr as $k=>$v) {
+                $path = $prefix === '' ? (string)$k : $prefix.'/'.$k;
+                if (is_array($v)) $out += $flatten($v, $path); else $out[$path] = $v;
+            }
+            return $out;
+        };
+        $fo = $flatten($o); $fn = $flatten($n);
+        foreach ($fn as $k=>$v) {
+            if (!array_key_exists($k, $fo) && strpos($k, '/settings/') === false) return false;
+            if (array_key_exists($k, $fo) && $fo[$k] !== $v && strpos($k, '/settings/') === false) return false;
+        }
+        return true;
+    }
+}
+if (!function_exists('reeid_elementor_walk_translate_and_commit_v2')) {
+    function reeid_elementor_walk_translate_and_commit_v2(int $post_id, string $source, string $target, string $tone = '', string $extra = ''): array
+    {
+        $orig_json = (string) get_post_meta($post_id, '_elementor_data', true);
+        $decoded   = json_decode($orig_json, true);
+        if (!is_array($decoded)) return ['ok'=>false, 'count'=>0, 'msg'=>'no_elementor_json'];
+
+        $is_doc   = false;
+        $root     = rt2_el_root_ref($decoded, $is_doc);
+        $nodes    = isset($root['elements']) && is_array($root['elements']) ? $root['elements'] : [];
+        $flat_map = [];
+        rt2_el_walk_collect($nodes, [], $flat_map);
+
+        $orig_json_before = $orig_json;
+
+        if (empty($flat_map)) {
+            reeid_elementor_commit_post_safe($post_id, $orig_json);
+            return ['ok'=>true, 'count'=>0, 'msg'=>'no_text_controls'];
+        }
+
+        $uniq_in  = array_values(array_unique(array_values($flat_map)));
+        $uniq_out = [];
+        foreach ($uniq_in as $str) {
+            if (function_exists('reeid_translate_html_with_openai')) {
+                $tr = (string) reeid_translate_html_with_openai($str, $source, $target, $tone, $extra);
+            } else {
+                $tr = $str;
+            }
+            $trim = trim((string)$tr);
+            $looks_json = ($trim !== '' && ($trim[0] === '{' || $trim[0] === '['));
+            if ($trim === '' || $looks_json) $tr = $str;
+            $uniq_out[$str] = $tr;
+        }
+        $translated_map = [];
+        foreach ($flat_map as $k => $v) $translated_map[$k] = $uniq_out[$v];
+
+        $new_json = rt2_el_assemble_with_map($orig_json, $translated_map);
+        if (!rt2_el_schema_guard_diff($orig_json, $new_json)) {
+            return ['ok'=>false, 'count'=>count($flat_map), 'msg'=>'schema_guard_block'];
+        }
+
+        // Commit
+        reeid_elementor_commit_post_safe($post_id, $new_json);
+
+        // Render guard; rollback if blank
+        try {
+            $html = class_exists('\Elementor\Plugin')
+                ? \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($post_id, false)
+                : '';
+        } catch (\Throwable $e) { $html = ''; }
+        $ok_render = (is_string($html) && strlen($html) > 0 && strpos($html, 'class="elementor') !== false);
+        if (!$ok_render) {
+            reeid_elementor_commit_post_safe($post_id, $orig_json_before);
+            return ['ok'=>false, 'count'=>count($flat_map), 'msg'=>'render_guard_rollback'];
+        }
         return ['ok'=>true, 'count'=>count($flat_map), 'msg'=>'saved'];
     }
 }
