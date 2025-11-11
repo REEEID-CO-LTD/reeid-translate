@@ -1,0 +1,168 @@
+/**
+ * assets/css/admin-styles.css
+ * Admin styles for the REEID Translate Settings page.
+ * - Two-column metabox, FAQ, tools
+ * - Info & Tips polish
+ * - Responsive layout
+ */
+
+/*-------------------------------------------
+ * 1. Two‐Column Metabox Layout
+ *-------------------------------------------*/
+ #reeid_translate_box select {
+    width: 95%;
+    box-sizing: border-box;
+}
+.meta-box-sortables select {
+    max-width: 95%!important;
+}
+#reeid-settings-wrapper.metabox-holder.columns-2 {}
+#reeid-settings-left.postbox-container,
+#reeid-settings-right.postbox-container {
+    width: 48%;
+}
+#reeid-settings-left .postbox,
+#reeid-settings-right .postbox {
+    margin-bottom: 20px;
+}
+
+/*-------------------------------------------
+ * 2. Dashicon Spacing (Info & Tips header)
+ *-------------------------------------------*/
+#reeid-settings-right .hndle .dashicons {
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+/*-------------------------------------------
+ * 3. Info & Tips Panel Typography & Spacing
+ *-------------------------------------------*/
+#reeid-settings-right .postbox .inside {
+    font-size: 14px;
+    line-height: 1.4;
+    background-color: #fcfcfc;
+    border-color: #ddd;
+}
+#reeid-settings-right .postbox .inside ul {
+    margin-left: 1.2em;
+    padding-left: 0;
+}
+#reeid-settings-right .postbox .inside ul li {
+    margin-bottom: 8px;
+}
+#reeid-settings-right .inside ul li + li {
+    border-top: 1px solid #e5e5e5;
+    padding-top: 8px;
+    margin-top: 8px;
+}
+#reeid-settings-right .postbox:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+/*-------------------------------------------
+ * 4. Responsive Adjustments
+ *-------------------------------------------*/
+@media (max-width: 900px) {
+    #reeid-settings-left.postbox-container,
+    #reeid-settings-right.postbox-container {
+        width: 100% !important;
+        float: none !important;
+    }
+    .reeid-tools-row { flex-direction: column; gap: 0; }
+}
+@media (max-width: 700px) {
+    #reeid-settings-left.postbox-container,
+    #reeid-settings-right.postbox-container {
+        width: 100% !important;
+        float: none !important;
+    }
+}
+
+/*-------------------------------------------
+ * 5. Tools Tab: Two Column Layout
+ *-------------------------------------------*/
+.reeid-tools-row { display: flex; gap: 40px; margin-top: 30px; }
+.reeid-tools-col { flex: 1 1 0; min-width: 320px; }
+.reeid-tools-col h2 { margin-top: 32px; }
+@media (max-width: 900px) {
+    .reeid-tools-row { flex-direction: column; gap: 0; }
+}
+
+/*-------------------------------------------
+ * 6. Two-Column FAQ (Settings > FAQ Tab, Accordion)
+ *-------------------------------------------*/
+.reeid-faq-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px 28px;
+    margin-top: 10px;
+}
+.reeid-faq-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.reeid-faq-item {
+    background: #f8faff;
+    border-radius: 7px;
+    border: 1px solid #e5eafd;
+    box-shadow: 0 1px 4px #e9eafd22;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    transition: box-shadow 0.14s;
+}
+.reeid-faq-item:focus-within,
+.reeid-faq-item.open {
+    box-shadow: 0 4px 16px #b6d5fa55;
+    border-color: #9ac4ef;
+}
+.reeid-faq-q {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: none;
+    border: none;
+    width: 100%;
+    text-align: left;
+    font-size: 15px;
+    font-weight: 600;
+    color: #1d325b;
+    padding: 8px 14px 8px 12px;
+    cursor: pointer;
+    border-radius: 7px;
+    transition: background 0.14s;
+}
+.reeid-faq-q:focus { outline: 2px solid #2871df; background: #e9eafd; }
+.reeid-faq-chevron {
+    margin-left: 8px;
+    font-size: 1.1em;
+    transition: transform 0.22s;
+}
+.reeid-faq-item.open .reeid-faq-chevron { transform: rotate(180deg); }
+.reeid-faq-a {
+    padding: 10px 18px 12px 18px;
+    color: #264;
+    font-size: 14px;
+    background: #fff;
+    border-top: 1px solid #e9eafd;
+    animation: fadeInFAQ 0.18s;
+}
+@keyframes fadeInFAQ {
+    from { opacity: 0; transform: translateY(-6px);}
+    to   { opacity: 1; transform: none;}
+}
+@media (max-width: 800px) {
+    .reeid-faq-cols { grid-template-columns: 1fr; }
+}
+
+/* FAQ Heading Color */
+.reeid-faq-tab h2 {
+    margin-top: 0;
+    margin-bottom: 8px;
+    color: #1742c3;
+}
+.reeid-faq-cols strong {
+    color: #24377a;
+    font-weight: 600;
+}

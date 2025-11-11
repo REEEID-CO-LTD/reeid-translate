@@ -1,0 +1,169 @@
+/*==============================================================================
+  REEID Translation: Unified UI Styles (Metabox + Elementor Panel)
+==============================================================================*/
+
+/* Panel Container */
+.reeid-panel,
+#reeid-elementor-panel {
+  padding: 0 16px 16px 16px;
+  background: #f8fafb !important;
+  border: 1px solid #e2e8f0;
+  margin-bottom: 24px;
+  box-shadow: 0 1px 6px 0 rgba(90,110,140,0.05);
+}
+
+/* Panel Header/Title — always use .reeid-panel-header! */
+.reeid-panel-header {
+  background: #cf616a !important;
+  color: #fff !important;
+  font-size: 15px !important;
+  font-weight: 300 !important;
+  margin: 0 -16px 15px -16px !important;
+  padding: 13px 16px 9px 16px !important;
+  letter-spacing: 0.2px;
+  line-height: 1.2;
+  box-shadow: none !important;
+  border: none !important;
+  text-align: center;
+}
+
+/* Fields, Inputs, Selects */
+.reeid-field {
+  margin-bottom: 13px !important;
+}
+.reeid-picklist,
+.reeid-field select,
+.reeid-field textarea {
+  width: 100% !important;
+  border-radius: 4px;
+  border: 1px solid #cbd5e1;
+  padding: 5px 8px !important;
+  font-size: 14px !important;
+  box-sizing: border-box !important;
+  min-height: 34px;
+  height: auto;
+}
+
+/* Button Container */
+.reeid-buttons {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  margin-top: 10px !important;
+}
+
+/* Button Styles */
+.reeid-button {
+  display: block !important;
+  width: 100% !important;
+  padding: 10px 0 !important;
+  border-radius: 4px !important;
+  border: 1.5px solid #87c9d7 !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  margin: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+  background: #eaf9fb !important;
+  color: #268ba4 !important;
+  transition: background .16s, color .16s !important;
+  text-align: center !important;    /* <-- Fixes your alignment */
+}
+.reeid-button.primary {
+  background: #a3e5ea !important;
+  color: #116070 !important;
+  border: 1.5px solid #87c9d7 !important;
+}
+.reeid-button.secondary {
+  background: #f2f4f8 !important;
+  color: #666 !important;
+  border: 1.5px solid #d1d5db !important;
+}
+.reeid-button:active {
+  background: #d3f1f5 !important;
+}
+
+/* Status Area */
+#reeid-status,
+.reeid-status {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  font-size: 14px !important;
+  background: none !important;
+  border: none !important;
+  margin-top: 12px !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+.reeid-status-row {
+  display: flex !important;
+  align-items: center !important;
+  margin-bottom: 3px !important;
+  width: 100% !important;
+}
+.reeid-status-emoji {
+  font-size: 16px !important;
+  margin-right: 6px !important;
+}
+.reeid-status-lang {
+  font-weight: 400 !important;
+  margin-right: 6px !important;
+}
+
+/* Progress Bar */
+.reeid-progress-bar {
+  width: 100% !important;
+  background: #eee !important;
+  height: 10px !important;
+  border-radius: 5px !important;
+  margin-bottom: 7px !important;
+  overflow: hidden !important;
+}
+.reeid-progress-inner {
+  background: #32c24d !important;
+  height: 10px !important;
+  width: 0% !important;
+  transition: width 0.5s !important;
+}
+.reeid-bulk-progress-list { margin-top: 16px; }
+.reeid-bulk-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 9px;
+    gap: 10px;
+    font-size: 14px;
+}
+.reeid-bulk-row-label {
+    width: 92px;
+    min-width: 62px;
+    font-size: 13px;
+    margin-right: 8px;
+    text-align: right;
+    font-weight: 600;
+}
+.reeid-perlang-progress {
+    display: inline-block;
+    width: 90px;
+    background: #eee;
+    border-radius: 4px;
+    overflow: hidden;
+    height: 10px;
+    vertical-align: middle;
+    margin-right: 8px;
+}
+.reeid-perlang-progress-inner {
+    background: #32c24d;
+    height: 100%;
+    width: 0%;
+    transition: width 1.1s cubic-bezier(.4,1.7,.5,1);
+}
+.reeid-bulk-row-status {
+    min-width: 50px;
+    margin-left: 7px;
+    font-size: 16px;
+    font-weight: 700;
+}
+.reeid-progress-bar { display: none; }
+
