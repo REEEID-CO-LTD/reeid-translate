@@ -15532,3 +15532,106 @@ if (!function_exists('rt3_el_walk_collect')) {
         }
     }
 }
+
+/* ========================================================================
+ * SECTION 99.E.api: Elementor — collect text paths via api.reeid.com (fallback local)
+ *  Endpoint (stateless): POST https://api.reeid.com/v1/walkers/elementor-paths
+ *  Body: { content: { elementor: "<JSON string>" }, source: "en", target: "gu" }
+ *  Expected: { ok: true, paths: ["<id>/settings/title", ...] }
+ *  This NEVER uses any OpenAI key. Pure paths only. BYOK preserved.
+ * ===================================================================== */
+if (!function_exists('reeid_elementor_collect_text_map_via_api_then_local')) {
+    function reeid_elementor_collect_text_map_via_api_then_local(string $elementor_json, string $source = 'en', string $target = 'en'): array {
+        $map = [];
+
+        // ---- 1) Try remote walker (headers are filtered; no OpenAI keys here)
+        $endpoint = apply_filters('reeid/elementor_api_endpoint', 'https://api.reeid.com/v1/walkers/elementor-paths');
+        $site     = home_url('/');
+        $license  = (string) get_option('reeid_license_key', '');
+        $args = [
+            'timeout' => 6,
+            'headers' => [
+                'Content-Type'      => 'application/json; charset=utf-8',
+                'X-REEID-Site'      => $site,
+                'X-REEID-License'   => $license,
+            ],
+            'body'    => wp_json_encode([
+                'content' => ['elementor' => $elementor_json],
+                'source'  => $source,
+                'target'  => $target,
+            ], JSON_UNESCAPED_UNICODE),
+        ];
+        $args = apply_filters('reeid/elementor_api_request_args', $args, $elementor_json, $source, $target);
+        $ok_remote = false;
+
+        if (function_exists('wp_remote_post')) {
+            $resp = wp_remote_post($endpoint, $args);
+            if (!is_wp_error($resp)) {
+                $code = (int) wp_remote_retrieve_response_code($resp);
+                $body = (string) wp_remote_retrieve_body($resp);
+                if ($code >= 200 && $code < 300) {
+                    $j = json_decode($body, true);
+                    if (is_array($j) && !empty($j['ok']) && !empty($j['paths']) && is_array($j['paths'])) {
+                        // Build path=>value map from returned paths
+                        $decoded = json_decode($elementor_json, true);
+                        $is_doc  = is_array($decoded) && isset($decoded['elements'], $decoded['version']);
+                        $root    = $is_doc ? $decoded : (is_array($decoded) ? ['elements'=>$decoded] : ['elements'=>[]]);
+                        $nodes   = isset($root['elements']) && is_array($root['elements']) ? $root['elements'] : [];
+
+                        $get_by_path = function(array $nodes, array $segs) use (&$get_by_path) {
+                            // path like: <id>/settings/title OR <id>/elements/<childId>/settings/text
+                            if (empty($segs)) return null;
+                            $id = array_shift($segs);
+                            foreach ($nodes as $node) {
+                                if (!is_array($node)) continue;
+                                $nid = isset($node['id']) ? (string)$node['id'] : '';
+                                if ($nid !== $id) continue;
+                                if (empty($segs)) return null;
+                                $key = array_shift($segs);
+                                if ($key === 'settings') {
+                                    $k = array_shift($segs);
+                                    if ($k !== null && isset($node['settings'][$k]) && is_string($node['settings'][$k])) {
+                                        return $node['settings'][$k];
+                                    }
+                                    return null;
+                                }
+                                if (in_array($key, ['elements','children','_children'], true) && !empty($node[$key]) && is_array($node[$key])) {
+                                    // next is child id, recurse
+                                    return $get_by_path($node[$key], $segs);
+                                }
+                                return null;
+                            }
+                            return null;
+                        };
+
+                        foreach ($j['paths'] as $p) {
+                            if (!is_string($p) || $p === '') continue;
+                            $segs = explode('/', $p);
+                            $val  = $get_by_path($nodes, $segs);
+                            if (is_string($val) && $val !== '') $map[$p] = $val;
+                        }
+                        $ok_remote = (count($map) > 0);
+                    }
+                }
+            }
+        }
+
+        // ---- 2) fallback to local walkers if remote gave nothing
+        if (!$ok_remote) {
+            $decoded = json_decode($elementor_json, true);
+            $is_doc  = is_array($decoded) && isset($decoded['elements'], $decoded['version']);
+            $root    = $is_doc ? $decoded : (is_array($decoded) ? ['elements'=>$decoded] : ['elements'=>[]]);
+            $nodes   = isset($root['elements']) && is_array($root['elements']) ? $root['elements'] : [];
+            // Prefer permissive collector if present
+            if (function_exists('rt3_el_walk_collect')) {
+                rt3_el_walk_collect($nodes, [], $map);
+            } elseif (function_exists('rt2_el_walk_collect')) {
+                rt2_el_walk_collect($nodes, [], $map);
+            } elseif (function_exists('rt_el_walk_collect')) {
+                rt_el_walk_collect($nodes, [], $map);
+            }
+        }
+
+        return $map;
+    }
+}
