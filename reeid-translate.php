@@ -15402,9 +15402,6 @@ $orig_count = count($flat_orig);
 
         
         // Absolute floor: if we collected too few text controls, refuse pre-commit
-        if ($orig_count < 5) {
-            return ["ok"=>false,"count"=>$orig_count,"msg"=>"too_few_paths"];
-        }
 // dedup + translate with keep-original safety
         $uniq_in  = array_values(array_unique(array_values($flat_orig)));
         $uniq_out = [];
