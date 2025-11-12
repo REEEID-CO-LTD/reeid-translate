@@ -76,6 +76,80 @@ if (! defined('ABSPATH')) { // guard
     exit;
 }
 
+
+/* SECTION: Elementor — Normalizers + Safe Render */
+if ( ! function_exists('reeid_el_get_json') ) {
+    function reeid_el_get_json(int $post_id) {
+        $raw = (string) get_post_meta($post_id, '_elementor_data', true);
+        $dec = json_decode($raw, true);
+        if (is_array($dec)) return $dec;
+
+        // try unserialize → JSON
+        if (function_exists('is_serialized') && is_serialized($raw)) {
+            $u = @unserialize($raw);
+            if (is_array($u)) return $u;
+        }
+
+        // last resort: minimal valid doc (object-root)
+        return [
+            'version'  => '0.4',
+            'title'    => 'Recovered',
+            'type'     => 'page',
+            'elements' => [[
+                'id'=>'rt-sec','elType'=>'section','settings'=>[],
+                'elements'=> [[
+                    'id'=>'rt-col','elType'=>'column','settings'=>['_column_size'=>100],
+                    'elements'=> [[
+                        'id'=>'rt-head','elType'=>'widget','widgetType'=>'heading',
+                        'settings'=>['title'=>'Recovered Elementor content'], 'elements'=>[]
+                    ]]
+                ]]
+            ]],
+            'settings' => []
+        ];
+    }
+}
+
+if ( ! function_exists('reeid_el_save_json') ) {
+    function reeid_el_save_json(int $post_id, $tree): void {
+        // Accept array-root (sections array) or object-root; store JSON string
+        if (is_array($tree) && isset($tree[0]) && is_array($tree[0])) {
+            $json = wp_json_encode($tree, JSON_UNESCAPED_UNICODE);
+        } else {
+            $json = wp_json_encode($tree, JSON_UNESCAPED_UNICODE);
+        }
+        update_post_meta($post_id, '_elementor_data', $json);
+        update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+        update_post_meta($post_id, '_elementor_template_type', 'wp-page');
+        $ver = get_option('elementor_version'); if (!$ver && defined('ELEMENTOR_VERSION')) $ver = ELEMENTOR_VERSION;
+        if ($ver) update_post_meta($post_id, '_elementor_version', $ver);
+
+        // normalize wrapper
+        $ps = get_post_meta($post_id, '_elementor_page_settings', true); if (!is_array($ps)) $ps=[];
+        unset($ps['template'],$ps['layout'],$ps['page_layout'],$ps['stretched_section'],$ps['container_width']);
+        update_post_meta($post_id, '_elementor_page_settings', $ps);
+
+        // regen CSS (safe if Elementor exists)
+        if (class_exists('\Elementor\Plugin')) {
+            try { (new \Elementor\Core\Files\CSS\Post($post_id))->update(); } catch (\Throwable $e) {}
+        }
+    }
+}
+
+if ( ! function_exists('reeid_el_render_ok') ) {
+    function reeid_el_render_ok(int $post_id): bool {
+        if (!class_exists('\Elementor\Plugin')) return true; // cannot render but don't block
+        try {
+            $html = \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($post_id, false);
+            return (is_string($html) && strlen($html)>0 && strpos($html,'class="elementor')!==false);
+        } catch (\Throwable $e) { return false; }
+    }
+}
+
+
+
+
+
 /* ===========================================================
  * SECTION 0.1 : REEID WC HELPERS BOOTSTRAP (single source-of-truth)
  * Ensures includes/wc-inline.php is loaded early and only once.
