@@ -15446,14 +15446,120 @@ if (!function_exists('reeid_elementor_walk_translate_and_commit_v3b')) {
 }
 
 /* ========================================================================
- * SECTION 99.E.3c: Elementor — Schema-safe translate v3c (50% text threshold + rollback)
+ * SECTION 99.E.3c: Elementor — Schema-safe translate v3c (+ built-in fallback)
+ * - Primary: collect→dedup→BYOK translate→assemble→guards→commit
+ * - Fallback: simple walker over heading/text-editor/button when collector empty
+ *   or when translated text falls below threshold; still schema-safe + render-guarded
  * ===================================================================== */
+
+/* --- Minimal helpers kept local to this section (guarded) --- */
+if (!function_exists('reeid_el_get_json')) {
+    function reeid_el_get_json(int $post_id) {
+        $raw = (string) get_post_meta($post_id, '_elementor_data', true);
+        $dec = json_decode($raw, true);
+        if (is_array($dec)) return $dec;
+
+        if (function_exists('is_serialized') && is_serialized($raw)) {
+            $u = @unserialize($raw);
+            if (is_array($u)) return $u;
+        }
+        // Minimal valid doc (object-root)
+        return [
+            'version'=>'0.4','title'=>'Recovered','type'=>'page',
+            'elements'=>[[
+                'id'=>'rt-sec','elType'=>'section','settings'=>[],
+                'elements'=>[[
+                    'id'=>'rt-col','elType'=>'column','settings'=>['_column_size'=>100],
+                    'elements'=>[[
+                        'id'=>'rt-head','elType'=>'widget','widgetType'=>'heading',
+                        'settings'=>['title'=>'Recovered Elementor content'],'elements'=>[]
+                    ]]
+                ]]
+            ]],
+            'settings'=>[]
+        ];
+    }
+}
+if (!function_exists('reeid_el_save_json')) {
+    function reeid_el_save_json(int $post_id, $tree): void {
+        $json = wp_json_encode($tree, JSON_UNESCAPED_UNICODE);
+        update_post_meta($post_id, '_elementor_data', $json);
+        update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+        update_post_meta($post_id, '_elementor_template_type', 'wp-page');
+        $ver = get_option('elementor_version'); if (!$ver && defined('ELEMENTOR_VERSION')) $ver = ELEMENTOR_VERSION;
+        if ($ver) update_post_meta($post_id, '_elementor_version', $ver);
+        $ps = get_post_meta($post_id, '_elementor_page_settings', true); if (!is_array($ps)) $ps=[];
+        unset($ps['template'],$ps['layout'],$ps['page_layout'],$ps['stretched_section'],$ps['container_width']);
+        update_post_meta($post_id, '_elementor_page_settings', $ps);
+        if (class_exists('\Elementor\Plugin')) { try { (new \Elementor\Core\Files\CSS\Post($post_id))->update(); } catch (\Throwable $e) {} }
+    }
+}
+if (!function_exists('reeid_el_render_ok')) {
+    function reeid_el_render_ok(int $post_id): bool {
+        if (!class_exists('\Elementor\Plugin')) return true;
+        try {
+            $html = \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($post_id,false);
+            return (is_string($html) && strlen($html)>0 && strpos($html,'class="elementor')!==false);
+        } catch (\Throwable $e) { return false; }
+    }
+}
+
+/* --- Simple fallback walker: array-root and object-root safe --- */
+if (!function_exists('reeid_el_simple_translate_and_commit')) {
+    function reeid_el_simple_translate_and_commit(int $post_id, string $source='en', string $target='gu', string $tone='', string $extra='') : array {
+        $tree = reeid_el_get_json($post_id);
+        $is_array_root = (isset($tree[0]) && is_array($tree[0]));
+        $sections = $is_array_root ? $tree : ($tree['elements'] ?? []);
+        if (!is_array($sections)) $sections = [];
+
+        $translate = function(string $s) use ($source,$target,$tone,$extra): string {
+            if (function_exists('reeid_translate_html_with_openai')) {
+                try { $out = (string) reeid_translate_html_with_openai($s,$source,$target,$tone,$extra); }
+                catch (\Throwable $e) { $out = $s; }
+                $t = trim($out);
+                if ($t === '' || ($t[0] ?? '') === '{' || ($t[0] ?? '') === '[') return $s;
+                return $out;
+            }
+            return $s.'['.$target.']';
+        };
+
+        $changed = 0;
+        $walk = function (&$nodes) use (&$walk,&$translate,&$changed) {
+            if (!is_array($nodes)) return;
+            foreach ($nodes as &$node) {
+                if (!is_array($node)) continue;
+                if (($node['elType'] ?? '') === 'widget') {
+                    $wt = $node['widgetType'] ?? '';
+                    $st = $node['settings'] ?? [];
+                    if ($wt==='heading'     && isset($st['title'])  && is_string($st['title']))  { $node['settings']['title']  = $translate($st['title']);  $changed++; }
+                    if ($wt==='text-editor' && isset($st['editor']) && is_string($st['editor'])) { $node['settings']['editor'] = $translate($st['editor']); $changed++; }
+                    if ($wt==='button'      && isset($st['text'])   && is_string($st['text']))   { $node['settings']['text']   = $translate($st['text']);   $changed++; }
+                }
+                if (isset($node['elements']) && is_array($node['elements'])) $walk($node['elements']);
+            }
+            unset($node);
+        };
+        $walk($sections);
+
+        if ($is_array_root) { reeid_el_save_json($post_id, $sections); }
+        else { $tree['elements'] = $sections; reeid_el_save_json($post_id, $tree); }
+
+        $ok = reeid_el_render_ok($post_id);
+        return ['ok'=>$ok, 'changed'=>$changed];
+    }
+}
+
+/* --- v3c with integrated fallback --- */
 if (!function_exists('reeid_elementor_walk_translate_and_commit_v3c')) {
     function reeid_elementor_walk_translate_and_commit_v3c(int $post_id, string $source, string $target, string $tone = '', string $extra = ''): array
     {
         $orig_json = (string) get_post_meta($post_id, '_elementor_data', true);
         $decoded   = json_decode($orig_json, true);
-        if (!is_array($decoded)) return ['ok'=>false,'count'=>0,'msg'=>'no_elementor_json'];
+        if (!is_array($decoded)) {
+            // try to recover and continue
+            $decoded   = reeid_el_get_json($post_id);
+            $orig_json = wp_json_encode($decoded, JSON_UNESCAPED_UNICODE);
+        }
 
         // root
         $is_doc=false;
@@ -15470,19 +15576,24 @@ if (!function_exists('reeid_elementor_walk_translate_and_commit_v3c')) {
         } elseif (function_exists('rt_el_walk_collect')) {
             rt_el_walk_collect($nodes, [], $flat_orig);
         }
-        
-$orig_count = count($flat_orig);
-        if ($orig_count === 0) return ['ok'=>true,'count'=>0,'msg'=>'no_text_controls'];
 
-        
-        // Absolute floor: if we collected too few text controls, refuse pre-commit
-// dedup + translate with keep-original safety
+        $orig_count = count($flat_orig);
+        $orig_json_before = $orig_json;
+
+        /* Fallback #1: no text controls -> simple walker */
+        if ($orig_count === 0) {
+            $fb = reeid_el_simple_translate_and_commit($post_id, $source, $target, $tone, $extra);
+            return $fb['ok'] ? ['ok'=>true,'count'=>0,'msg'=>'fallback_saved','changed'=>($fb['changed']??0)]
+                             : ['ok'=>false,'count'=>0,'msg'=>'fallback_failed'];
+        }
+
+        // dedup + translate with keep-original safety
         $uniq_in  = array_values(array_unique(array_values($flat_orig)));
         $uniq_out = [];
         foreach ($uniq_in as $str) {
             $tr = $str;
             if (function_exists('reeid_translate_html_with_openai')) {
-                $try = (string) reeid_translate_html_with_openai($str, $source, $target, $tone, $extra);
+                $try  = (string) reeid_translate_html_with_openai($str, $source, $target, $tone, $extra);
                 $trim = trim($try);
                 $looks_json = ($trim !== '' && ($trim[0] === '{' || $trim[0] === '['));
                 if ($trim !== '' && !$looks_json) $tr = $try;
@@ -15499,12 +15610,14 @@ $orig_count = count($flat_orig);
 
         // schema guard
         if (function_exists('rt2_el_schema_guard_diff')) {
-            if (!rt2_el_schema_guard_diff($orig_json, $new_json)) return ['ok'=>false,'count'=>$orig_count,'msg'=>'schema_guard_block'];
+            if (!rt2_el_schema_guard_diff($orig_json, $new_json))
+                return ['ok'=>false,'count'=>$orig_count,'msg'=>'schema_guard_block'];
         } elseif (function_exists('rt_el_schema_guard_diff')) {
-            if (!rt_el_schema_guard_diff($orig_json, $new_json)) return ['ok'=>false,'count'=>$orig_count,'msg'=>'schema_guard_block'];
+            if (!rt_el_schema_guard_diff($orig_json, $new_json))
+                return ['ok'=>false,'count'=>$orig_count,'msg'=>'schema_guard_block'];
         }
 
-        // pre-commit: translated text count must be >= 50% of original
+        // pre-commit threshold
         $dec_new = json_decode($new_json, true);
         $is_doc_new=false;
         $root_new = function_exists('rt2_el_root_ref') ? rt2_el_root_ref($dec_new,$is_doc_new)
@@ -15518,11 +15631,16 @@ $orig_count = count($flat_orig);
         } elseif (function_exists('rt_el_walk_collect')) {
             rt_el_walk_collect($nodes_new, [], $flat_new);
         }
-        if (count($flat_new) < max(1, (int) floor($orig_count * 0.5))) {
-            return ['ok'=>false,'count'=>$orig_count,'msg'=>'text_threshold_block'];
+
+        $threshold = max(1, (int) floor($orig_count * 0.5));
+        if (count($flat_new) < $threshold) {
+            /* Fallback #2: translated text below 50% -> simple walker */
+            $fb = reeid_el_simple_translate_and_commit($post_id, $source, $target, $tone, $extra);
+            return $fb['ok'] ? ['ok'=>true,'count'=>$orig_count,'msg'=>'fallback_saved_threshold','changed'=>($fb['changed']??0)]
+                             : ['ok'=>false,'count'=>$orig_count,'msg'=>'fallback_failed_threshold'];
         }
 
-        // optional title/slug (array ctx)
+        // optional title/slug (array ctx safe)
         if ($p = get_post($post_id)) {
             $title_src = (string)$p->post_title;
             $translated_title = $title_src; $translated_slug = '';
@@ -15532,7 +15650,12 @@ $orig_count = count($flat_orig);
                     $pack = (array) reeid_translate_via_openai_with_slug($title_src, "", $ctx);
                     if (!empty($pack['title'])) $translated_title = (string)$pack['title'];
                     if (!empty($pack['slug']))  $translated_slug  = (string)$pack['slug'];
-                } catch (\Throwable $e) {}
+                } catch (\Throwable $e) {
+                    if (function_exists('reeid_translate_html_with_openai')) {
+                        $try = (string) reeid_translate_html_with_openai($title_src, $source, $target, $tone, $extra);
+                        if (trim($try) !== '') $translated_title = $try;
+                    }
+                }
             } elseif (function_exists('reeid_translate_html_with_openai')) {
                 $try = (string) reeid_translate_html_with_openai($title_src, $source, $target, $tone, $extra);
                 if (trim($try) !== '') $translated_title = $try;
@@ -15550,20 +15673,25 @@ $orig_count = count($flat_orig);
         if (function_exists('reeid_elementor_commit_post_safe')) reeid_elementor_commit_post_safe($post_id, $new_json);
         else update_post_meta($post_id, '_elementor_data', $new_json);
 
-        // post-commit render guard
+        // post-commit render guard (attempt fallback before final rollback)
         try { $html = class_exists('\Elementor\Plugin') ? \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($post_id, false) : ''; }
         catch (\Throwable $e) { $html = ''; }
         $has_wrapper = (is_string($html) && strpos($html, 'class="elementor') !== false);
         $visible = trim(strip_tags((string)$html));
+
         if (!$has_wrapper || strlen($visible) < 20) {
-            if (function_exists('reeid_elementor_commit_post_safe')) reeid_elementor_commit_post_safe($post_id, $orig_json);
-            else update_post_meta($post_id, '_elementor_data', $orig_json);
-            return ['ok'=>false,'count'=>$orig_count,'msg'=>'render_guard_rollback'];
+            // try fallback on original tree
+            if (function_exists('reeid_elementor_commit_post_safe')) { reeid_elementor_commit_post_safe($post_id, $orig_json_before); }
+            else { update_post_meta($post_id, '_elementor_data', $orig_json_before); }
+            $fb = reeid_el_simple_translate_and_commit($post_id, $source, $target, $tone, $extra);
+            return $fb['ok'] ? ['ok'=>true,'count'=>$orig_count,'msg'=>'fallback_saved_guard','changed'=>($fb['changed']??0)]
+                             : ['ok'=>false,'count'=>$orig_count,'msg'=>'render_guard_rollback'];
         }
 
         return ['ok'=>true,'count'=>$orig_count,'msg'=>'saved'];
     }
 }
+
 
 /* ========================================================================
  * SECTION 99.E.perm: Elementor — permissive text collector (heuristic)
