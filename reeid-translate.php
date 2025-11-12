@@ -15669,6 +15669,15 @@ if (!function_exists('reeid_elementor_walk_translate_and_commit_v3c')) {
             }
         }
 
+        // normalize commit to ARRAY-ROOT for _elementor_data
+        $__dec_new = json_decode($new_json, true);
+        if (is_array($__dec_new)) {
+            $is_array_root = array_keys($__dec_new)===range(0,count($__dec_new)-1);
+            if (!$is_array_root && isset($__dec_new['elements']) && is_array($__dec_new['elements'])) {
+                $new_json = wp_json_encode($__dec_new['elements'], JSON_UNESCAPED_UNICODE);
+            }
+        }
+
         // commit + css
         if (function_exists('reeid_elementor_commit_post_safe')) reeid_elementor_commit_post_safe($post_id, $new_json);
         else update_post_meta($post_id, '_elementor_data', $new_json);
