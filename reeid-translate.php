@@ -15487,3 +15487,48 @@ if (!function_exists('reeid_elementor_walk_translate_and_commit_v3c')) {
         return ['ok'=>true,'count'=>$orig_count,'msg'=>'saved'];
     }
 }
+
+/* ========================================================================
+ * SECTION 99.E.perm: Elementor — permissive text collector (heuristic)
+ *  - Collect ANY string setting that looks like copy (skip URLs, colors, CSS)
+ *  - Never touches schema keys (elType/widgetType/elements/id)
+ * ===================================================================== */
+if (!function_exists('rt3_el_is_texty')) {
+    function rt3_el_is_texty(string $key, string $val): bool {
+        $k = strtolower($key);
+        $v = trim($val);
+        if ($v === '') return false;
+        if ($k === '' || $k[0] === '_') return false;                   // meta
+        if (preg_match('~^(url|link|image|background|bg_|icon|html_tag|alignment|align|size|width|height|color|colors|typography|font|letter|line_height|border|padding|margin|box_shadow|object_|z_index|position|hover_|motion_fx|transition|duration)$~i', $k)) {
+            return false;
+        }
+        if (preg_match('~^(#?[0-9a-f]{3,8}|var\(--|https?://|/wp-content/|[0-9]+(px|em|rem|%)$)~i', $v)) {
+            return false;                                              // css/urls/colors
+        }
+        // looks like human text (has a letter and either space or non-ascii)
+        if (!preg_match('~[A-Za-z\p{L}]~u', $v)) return false;
+        if (!preg_match('~(\s|\p{M}|\p{L}{3,})~u', $v)) return false;
+        return true;
+    }
+}
+if (!function_exists('rt3_el_walk_collect')) {
+    function rt3_el_walk_collect(array $nodes, array $path, array &$map): void {
+        foreach ($nodes as $node) {
+            if (!is_array($node)) continue;
+            $id = isset($node['id']) ? (string)$node['id'] : '';
+            $p  = array_merge($path, [$id !== '' ? $id : 'node']);
+            if (isset($node['settings']) && is_array($node['settings'])) {
+                foreach ($node['settings'] as $k => $v) {
+                    if (is_string($v) && rt3_el_is_texty((string)$k, (string)$v)) {
+                        $map[implode('/', array_merge($p, ['settings', (string)$k]))] = $v;
+                    }
+                }
+            }
+            foreach (['elements','children','_children'] as $kids) {
+                if (!empty($node[$kids]) && is_array($node[$kids])) {
+                    rt3_el_walk_collect($node[$kids], array_merge($p, [$kids]), $map);
+                }
+            }
+        }
+    }
+}
