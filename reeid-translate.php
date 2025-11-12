@@ -15218,14 +15218,8 @@ if (!function_exists('reeid_elementor_walk_translate_and_commit_v3')) {
         if ($current) {
             $title_src = (string)$current->post_title;
             $translated_title = $title_src; $translated_slug='';
-            
-if (function_exists(reeid_translate_via_openai_with_slug)) {
-    try {
-        $ctx = [source=>$source,target=>$target,tone=>$tone,extra=>$extra];
-        $pack = (array) reeid_translate_via_openai_with_slug($title_src, "", $ctx);
-    } catch (Throwable $e) { $pack = []; }
-} 
-
+            if (function_exists('reeid_translate_via_openai_with_slug')) {
+                $pack = (array) reeid_translate_via_openai_with_slug($title_src, "", $source, $target, $tone, $extra);
                 if (!empty($pack['title'])) $translated_title = (string)$pack['title'];
                 if (!empty($pack['slug']))  $translated_slug  = (string)$pack['slug'];
             } elseif (function_exists('reeid_translate_html_with_openai')) {
@@ -15246,6 +15240,123 @@ if (function_exists(reeid_translate_via_openai_with_slug)) {
         else                                                    { update_post_meta($post_id, '_elementor_data', $new_json); }
 
         // Post-commit guard (wrapper + visible text)
+        try { $html = class_exists('\Elementor\Plugin') ? \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($post_id, false) : ''; }
+        catch (\Throwable $e) { $html = ''; }
+        $has_wrapper = (is_string($html) && strpos($html, 'class="elementor') !== false);
+        $visible = trim(strip_tags((string)$html));
+        if (!$has_wrapper || strlen($visible) < 20) {
+            if (function_exists('reeid_elementor_commit_post_safe')) { reeid_elementor_commit_post_safe($post_id, $orig_json_before); }
+            else                                                    { update_post_meta($post_id, '_elementor_data', $orig_json_before); }
+            return ['ok'=>false,'count'=>count($flat_map),'msg'=>'render_guard_rollback'];
+        }
+
+        return ['ok'=>true,'count'=>count($flat_map),'msg'=>'saved'];
+    }
+}
+
+/* ========================================================================
+ * SECTION 99.E.3b: Elementor — Schema-safe translate v3b (array ctx + rollback)
+ * ===================================================================== */
+if (!function_exists('reeid_elementor_walk_translate_and_commit_v3b')) {
+    function reeid_elementor_walk_translate_and_commit_v3b(int $post_id, string $source, string $target, string $tone = '', string $extra = ''): array
+    {
+        $orig_json = (string) get_post_meta($post_id, '_elementor_data', true);
+        $decoded   = json_decode($orig_json, true);
+        if (!is_array($decoded)) return ['ok'=>false,'count'=>0,'msg'=>'no_elementor_json'];
+
+        // Root
+        $is_doc=false;
+        if (function_exists('rt2_el_root_ref'))      { $root = rt2_el_root_ref($decoded,$is_doc); }
+        elseif (function_exists('rt_el_root_ref'))   { $root = rt_el_root_ref($decoded,$is_doc); }
+        else                                         { $root = is_array($decoded) ? ['elements'=>$decoded] : ['elements'=>[]]; }
+
+        // Collect text paths (prefer remote api walker when available)
+        $flat_map = [];
+        if (function_exists('reeid_elementor_collect_text_map_via_api_then_local')) {
+            $flat_map = reeid_elementor_collect_text_map_via_api_then_local($orig_json);
+        } else {
+            $nodes = isset($root['elements']) && is_array($root['elements']) ? $root['elements'] : [];
+            if (function_exists('rt2_el_walk_collect'))      rt2_el_walk_collect($nodes, [], $flat_map);
+            elseif (function_exists('rt_el_walk_collect'))   rt_el_walk_collect($nodes, [], $flat_map);
+        }
+
+        $orig_json_before = $orig_json;
+
+        if (empty($flat_map)) {
+            if (function_exists('reeid_elementor_commit_post_safe')) { reeid_elementor_commit_post_safe($post_id, $orig_json); }
+            return ['ok'=>true,'count'=>0,'msg'=>'no_text_controls'];
+        }
+
+        // Dedup + BYOK translate (keep original if empty/JSON-like)
+        $uniq_in  = array_values(array_unique(array_values($flat_map)));
+        $uniq_out = [];
+        foreach ($uniq_in as $str) {
+            $tr = $str;
+            if (function_exists('reeid_translate_html_with_openai')) {
+                $try  = (string) reeid_translate_html_with_openai($str, $source, $target, $tone, $extra);
+                $trim = trim($try);
+                $looks_json = ($trim !== '' && ($trim[0] === '{' || $trim[0] === '['));
+                if ($trim !== '' && !$looks_json) $tr = $try;
+            }
+            $uniq_out[$str] = $tr;
+        }
+        $translated_map = [];
+        foreach ($flat_map as $k=>$v) $translated_map[$k] = $uniq_out[$v];
+
+        // Assemble
+        if (function_exists('rt2_el_assemble_with_map'))      $new_json = rt2_el_assemble_with_map($orig_json, $translated_map);
+        else                                                  $new_json = rt_el_assemble_with_map($orig_json, $translated_map);
+
+        // Guard schema + ensure text remains
+        if (function_exists('rt2_el_schema_guard_diff'))      { if (!rt2_el_schema_guard_diff($orig_json, $new_json)) return ['ok'=>false,'count'=>count($flat_map),'msg'=>'schema_guard_block']; }
+        elseif (function_exists('rt_el_schema_guard_diff'))   { if (!rt_el_schema_guard_diff($orig_json, $new_json))  return ['ok'=>false,'count'=>count($flat_map),'msg'=>'schema_guard_block']; }
+
+        $dec_new = json_decode($new_json, true);
+        $is_doc_new=false;
+        if (function_exists('rt2_el_root_ref'))      { $root_new = rt2_el_root_ref($dec_new,$is_doc_new); }
+        elseif (function_exists('rt_el_root_ref'))   { $root_new = rt_el_root_ref($dec_new,$is_doc_new); }
+        else                                         { $root_new = is_array($dec_new) ? ['elements'=>$dec_new] : ['elements'=>[]]; }
+        $nodes_new = isset($root_new['elements']) && is_array($root_new['elements']) ? $root_new['elements'] : [];
+        $flat_new  = [];
+        if (function_exists('rt2_el_walk_collect'))      rt2_el_walk_collect($nodes_new, [], $flat_new);
+        elseif (function_exists('rt_el_walk_collect'))   rt_el_walk_collect($nodes_new, [], $flat_new);
+        if (count($flat_new) === 0) return ['ok'=>false,'count'=>count($flat_map),'msg'=>'text_guard_block'];
+
+        // Title/slug (call your slug API with ARRAY ctx to avoid fatals)
+        if ($p = get_post($post_id)) {
+            $title_src = (string)$p->post_title;
+            $translated_title = $title_src; $translated_slug = '';
+            if (function_exists('reeid_translate_via_openai_with_slug')) {
+                try {
+                    $ctx = ['source'=>$source,'target'=>$target,'tone'=>$tone,'extra'=>$extra];
+                    $pack = (array) reeid_translate_via_openai_with_slug($title_src, "", $ctx);
+                    if (!empty($pack['title'])) $translated_title = (string)$pack['title'];
+                    if (!empty($pack['slug']))  $translated_slug  = (string)$pack['slug'];
+                } catch (\Throwable $e) {
+                    // fall back to title-only
+                    if (function_exists('reeid_translate_html_with_openai')) {
+                        $try = (string) reeid_translate_html_with_openai($title_src, $source, $target, $tone, $extra);
+                        if (trim($try) !== '') $translated_title = $try;
+                    }
+                }
+            } elseif (function_exists('reeid_translate_html_with_openai')) {
+                $try = (string) reeid_translate_html_with_openai($title_src, $source, $target, $tone, $extra);
+                if (trim($try) !== '') $translated_title = $try;
+            }
+            $upd = ['ID'=>$post_id];
+            if (trim($translated_title) !== '') $upd['post_title'] = $translated_title;
+            if (trim($translated_slug)  !== '') $upd['post_name']  = sanitize_title($translated_slug);
+            if (count($upd) > 1) wp_update_post($upd);
+            if (function_exists('reeid_maybe_update_slug_from_title')) {
+                reeid_maybe_update_slug_from_title($post_id, $translated_title, $translated_slug ?? '');
+            }
+        }
+
+        // Commit + CSS
+        if (function_exists('reeid_elementor_commit_post_safe')) { reeid_elementor_commit_post_safe($post_id, $new_json); }
+        else                                                    { update_post_meta($post_id, '_elementor_data', $new_json); }
+
+        // Post-commit render guard
         try { $html = class_exists('\Elementor\Plugin') ? \Elementor\Plugin::$instance->frontend->get_builder_content_for_display($post_id, false) : ''; }
         catch (\Throwable $e) { $html = ''; }
         $has_wrapper = (is_string($html) && strpos($html, 'class="elementor') !== false);
