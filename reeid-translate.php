@@ -15218,8 +15218,14 @@ if (!function_exists('reeid_elementor_walk_translate_and_commit_v3')) {
         if ($current) {
             $title_src = (string)$current->post_title;
             $translated_title = $title_src; $translated_slug='';
-            if (function_exists('reeid_translate_via_openai_with_slug')) {
-                $pack = (array) reeid_translate_via_openai_with_slug($title_src, "", $source, $target, $tone, $extra);
+            
+if (function_exists(reeid_translate_via_openai_with_slug)) {
+    try {
+        $ctx = [source=>$source,target=>$target,tone=>$tone,extra=>$extra];
+        $pack = (array) reeid_translate_via_openai_with_slug($title_src, "", $ctx);
+    } catch (Throwable $e) { $pack = []; }
+} 
+
                 if (!empty($pack['title'])) $translated_title = (string)$pack['title'];
                 if (!empty($pack['slug']))  $translated_slug  = (string)$pack['slug'];
             } elseif (function_exists('reeid_translate_html_with_openai')) {
