@@ -15396,10 +15396,16 @@ if (!function_exists('reeid_elementor_walk_translate_and_commit_v3c')) {
         } elseif (function_exists('rt_el_walk_collect')) {
             rt_el_walk_collect($nodes, [], $flat_orig);
         }
-        $orig_count = count($flat_orig);
+        
+$orig_count = count($flat_orig);
         if ($orig_count === 0) return ['ok'=>true,'count'=>0,'msg'=>'no_text_controls'];
 
-        // dedup + translate with keep-original safety
+        
+        // Absolute floor: if we collected too few text controls, refuse pre-commit
+        if ($orig_count < 5) {
+            return ["ok"=>false,"count"=>$orig_count,"msg"=>"too_few_paths"];
+        }
+// dedup + translate with keep-original safety
         $uniq_in  = array_values(array_unique(array_values($flat_orig)));
         $uniq_out = [];
         foreach ($uniq_in as $str) {
