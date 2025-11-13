@@ -1,8 +1,4 @@
 <?php
-require_once __DIR__ . "/includes/rt-wc-i18n-lite.php";
-require_once __DIR__ . "/includes/reeid-focuskw-sync.php";
-require_once __DIR__ . "/includes/seo-sync.php";
-
 /**
  * Plugin Name:       REEID Translate
  * Plugin URI:        https://reeid.com/reeid-translation-plugin/
@@ -15,6 +11,11 @@ require_once __DIR__ . "/includes/seo-sync.php";
  * Text Domain:       reeid-translate
  * Domain Path:       /languages
  */
+
+
+require_once __DIR__ . "/includes/rt-wc-i18n-lite.php";
+require_once __DIR__ . "/includes/reeid-focuskw-sync.php";
+require_once __DIR__ . "/includes/seo-sync.php";
 
 // Load translations on init (avoid early JIT notice).
 add_action('init', 'reeid_translate_load_textdomain');
