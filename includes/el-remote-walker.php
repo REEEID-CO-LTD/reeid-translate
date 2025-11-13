@@ -181,6 +181,33 @@ if (! function_exists('reeid_elementor_commit_local')) {
         update_post_meta($post_id, '_elementor_data', $json);
         update_post_meta($post_id, '_elementor_edit_mode', 'builder');
         update_post_meta(
+            // NEW: render builder once and sync to post_content as fallback
+        if (class_exists('\\Elementor\\Plugin')) {
+            try {
+                $frontend = \Elementor\Plugin::instance()->frontend;
+
+                // ensure global $post context for builder
+                $prev_post = $GLOBALS['post'] ?? null;
+                $GLOBALS['post'] = get_post($post_id);
+
+                $html = $frontend->get_builder_content($post_id, true);
+
+                if (is_string($html) && trim($html) !== '') {
+                    wp_update_post([
+                        'ID'           => $post_id,
+                        'post_content' => $html,
+                    ]);
+                }
+
+                if ($prev_post instanceof \WP_Post) {
+                    $GLOBALS['post'] = $prev_post;
+                } else {
+                    unset($GLOBALS['post']);
+                }
+            } catch (\Throwable $e) {
+                // ignore - fallback only
+            }
+        }
             $post_id,
             '_elementor_data_version',
             defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : (string) time()
