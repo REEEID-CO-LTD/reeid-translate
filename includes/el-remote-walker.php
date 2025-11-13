@@ -175,7 +175,7 @@ if (! function_exists('reeid_elementor_commit_local')) {
         // ensure string
         $json = is_string($elementor_raw) ? $elementor_raw : wp_json_encode($elementor_raw, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
 
-        update_post_meta($post_id, '_elementor_data', wp_slash($json));
+        update_post_meta(, '_elementor_data', );
         update_post_meta($post_id, '_elementor_edit_mode', 'builder');
         update_post_meta($post_id, '_elementor_data_version', defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : (string) time());
 
