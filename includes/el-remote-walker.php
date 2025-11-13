@@ -173,11 +173,18 @@ if (! function_exists('reeid_elementor_commit_local')) {
     function reeid_elementor_commit_local(int $post_id, $elementor_raw)
     {
         // ensure string
-        $json = is_string($elementor_raw) ? $elementor_raw : wp_json_encode($elementor_raw, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        $json = is_string($elementor_raw)
+            ? $elementor_raw
+            : wp_json_encode($elementor_raw, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
-        update_post_meta(, '_elementor_data', );
+        // IMPORTANT: store clean, un-slashed JSON
+        update_post_meta($post_id, '_elementor_data', $json);
         update_post_meta($post_id, '_elementor_edit_mode', 'builder');
-        update_post_meta($post_id, '_elementor_data_version', defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : (string) time());
+        update_post_meta(
+            $post_id,
+            '_elementor_data_version',
+            defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : (string) time()
+        );
 
         // try Document->save with minimal arg array (avoid "Too few arguments")
         try {
@@ -186,11 +193,9 @@ if (! function_exists('reeid_elementor_commit_local')) {
                 if (method_exists($docs, 'get')) {
                     $doc = $docs->get($post_id);
                     if ($doc && method_exists($doc, 'save')) {
-                        // pass minimal payload; avoids earlier "too few args" problem
                         try {
                             $doc->save(['post_id' => $post_id]);
-                        } catch (Throwable $e) {
-                            // fallback: call update() if present
+                        } catch (\Throwable $e) {
                             if (method_exists($doc, 'update')) {
                                 $doc->update(['post_type' => get_post_type($post_id)]);
                             }
@@ -198,18 +203,27 @@ if (! function_exists('reeid_elementor_commit_local')) {
                     }
                 }
             }
-        } catch (Throwable $e) {
+        } catch (\Throwable $e) {
             // ignore - not fatal
         }
 
         // Clear caches and attempt to remove generated CSS files to force rebuild
-        if (function_exists('wp_cache_flush')) wp_cache_flush();
+        if (function_exists('wp_cache_flush')) {
+            wp_cache_flush();
+        }
         $css_dir = WP_CONTENT_DIR . '/uploads/elementor/css';
         if (is_dir($css_dir)) {
-            $it = new DirectoryIterator($css_dir);
-            foreach ($it as $fi) {
-                if ($fi->isFile()) @unlink($fi->getPathname());
+            try {
+                $it = new \DirectoryIterator($css_dir);
+                foreach ($it as $fi) {
+                    if ($fi->isFile() && preg_match('/^post-' . (int) $post_id . '\./', $fi->getFilename())) {
+                        @unlink($fi->getPathname());
+                    }
+                }
+            } catch (\Throwable $e) {
+                // ignore
             }
         }
     }
 }
+
