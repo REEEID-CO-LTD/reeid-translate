@@ -112,6 +112,12 @@ if ( ! function_exists('reeid_el_get_json') ) {
 }
 
 if ( ! function_exists('reeid_el_save_json') ) {
+    /**
+     * Save Elementor JSON and keep page settings intact.
+     *
+     * @param int          $post_id
+     * @param array|string $tree Elementor data (array or JSON string).
+     */
     function reeid_el_save_json(int $post_id, $tree): void {
         // Accept array-root (sections array) or object-root; store JSON string
         if (is_array($tree) && isset($tree[0]) && is_array($tree[0])) {
@@ -119,23 +125,37 @@ if ( ! function_exists('reeid_el_save_json') ) {
         } else {
             $json = wp_json_encode($tree, JSON_UNESCAPED_UNICODE);
         }
+
         update_post_meta($post_id, '_elementor_data', $json);
         update_post_meta($post_id, '_elementor_edit_mode', 'builder');
         update_post_meta($post_id, '_elementor_template_type', 'wp-page');
-        $ver = get_option('elementor_version'); if (!$ver && defined('ELEMENTOR_VERSION')) $ver = ELEMENTOR_VERSION;
-        if ($ver) update_post_meta($post_id, '_elementor_version', $ver);
 
-        // normalize wrapper
-        $ps = get_post_meta($post_id, '_elementor_page_settings', true); if (!is_array($ps)) $ps=[];
-        unset($ps['template'],$ps['layout'],$ps['page_layout'],$ps['stretched_section'],$ps['container_width']);
+        $ver = get_option('elementor_version');
+        if (!$ver && defined('ELEMENTOR_VERSION')) {
+            $ver = ELEMENTOR_VERSION;
+        }
+        if ($ver) {
+            update_post_meta($post_id, '_elementor_version', $ver);
+        }
+
+        // 🔁 Keep _elementor_page_settings as-is (do NOT strip layout keys)
+        $ps = get_post_meta($post_id, '_elementor_page_settings', true);
+        if (! is_array($ps)) {
+            $ps = array();
+        }
         update_post_meta($post_id, '_elementor_page_settings', $ps);
 
-        // regen CSS (safe if Elementor exists)
+        // Regen CSS (safe if Elementor exists)
         if (class_exists('\Elementor\Plugin')) {
-            try { (new \Elementor\Core\Files\CSS\Post($post_id))->update(); } catch (\Throwable $e) {}
+            try {
+                (new \Elementor\Core\Files\CSS\Post($post_id))->update();
+            } catch (\Throwable $e) {
+                // silent fail, no fatal for frontend
+            }
         }
     }
 }
+
 
 if ( ! function_exists('reeid_el_render_ok') ) {
     function reeid_el_render_ok(int $post_id): bool {
