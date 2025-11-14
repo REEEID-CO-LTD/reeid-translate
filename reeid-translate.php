@@ -7330,19 +7330,45 @@ $title_tr   = '';
 $excerpt_tr = '';
 
 if ($editor === 'elementor') {
-    $result = reeid_elementor_translate_json($post_id, $default_source_lang, $target_lang, $tone, $prompt);
+    // Prefer the S13 Elementor translator (rulepack + /v1/translate) when available.
+    $translator_fn = null;
+    if (function_exists('reeid_elementor_translate_json_s13')) {
+        $translator_fn = 'reeid_elementor_translate_json_s13';
+    } elseif (function_exists('reeid_elementor_translate_json')) {
+        $translator_fn = 'reeid_elementor_translate_json';
+    }
 
-    // Collections for diff counts (optional)
-    $raw_elem = function_exists('reeid_get_sanitized_elementor_data')
+    if (! $translator_fn) {
+        wp_send_json_error([
+            'error'  => 'elementor_translator_missing',
+            'detail' => 'No Elementor JSON translator function is available.',
+        ]);
+    }
+
+    // Call the translator (driven by api.reeid.com walker)
+    $result = $translator_fn(
+        $post_id,
+        $default_source_lang,
+        $target_lang,
+        $tone,
+        $prompt
+    );
+
+    // Pre-translation stats (optional)
+    $raw_elem    = function_exists('reeid_get_sanitized_elementor_data')
         ? reeid_get_sanitized_elementor_data($post_id)
         : get_post_meta($post_id, '_elementor_data', true);
 
-    $elem_before = is_array($raw_elem) ? $raw_elem : @json_decode((string)$raw_elem, true);
+    $elem_before = is_array($raw_elem)
+        ? $raw_elem
+        : @json_decode((string) $raw_elem, true);
+
     if (is_array($elem_before) && function_exists('reeid_elementor_walk_and_collect')) {
         $before_map = [];
         reeid_elementor_walk_and_collect($elem_before, '', $before_map);
         $collected_count = count($before_map);
     }
+
     if (isset($result['data']) && is_array($result['data']) && function_exists('reeid_elementor_walk_and_collect')) {
         $after_map = [];
         reeid_elementor_walk_and_collect($result['data'], '', $after_map);
@@ -7350,10 +7376,13 @@ if ($editor === 'elementor') {
     }
 
     if (empty($result['success'])) {
-        wp_send_json_error(['error' => 'elementor_failed', 'detail' => $result]);
+        wp_send_json_error([
+            'error'  => 'elementor_failed',
+            'detail' => $result,
+        ]);
     }
 
-    // --- Build a clean, native slug candidate from result -> title fallback
+    // --- Build clean native slug candidate from translator result (title/slug) ---
     $slug_candidate = '';
     if (!empty($result['slug']) && is_string($result['slug'])) {
         $slug_candidate = $result['slug'];
@@ -7362,6 +7391,8 @@ if ($editor === 'elementor') {
     } else {
         $slug_candidate = (string) $post->post_title;
     }
+
+    // Use native slug sanitizer (handles non-ASCII without percent-encoding)
     $slug_candidate = function_exists('reeid_sanitize_native_slug')
         ? reeid_sanitize_native_slug($slug_candidate)
         : sanitize_title($slug_candidate);
@@ -7375,7 +7406,7 @@ if ($editor === 'elementor') {
         (int) get_post_field('post_parent', $target_id)
     );
 
-    // Save translated post (Elementor)
+    // Build translated post array
     $new_post = [
         'ID'           => $target_id,
         'post_title'   => $result['title']   ?? $post->post_title,
@@ -7386,71 +7417,89 @@ if ($editor === 'elementor') {
         'post_excerpt' => $result['excerpt'] ?? $post->post_excerpt,
     ];
 
-    // === Force native slug for this update only (Elementor scope) ===
+    // === Force this exact slug at save time (Elementor scope only) ===
     $reeid_slug_to_force = $new_post['post_name'];
+
     $reeid_cb_sanitize = static function ($title, $raw_title, $context) use (&$reeid_slug_to_force) {
-        return (is_string($reeid_slug_to_force) && $reeid_slug_to_force !== '') ? $reeid_slug_to_force : $title;
+        return (is_string($reeid_slug_to_force) && $reeid_slug_to_force !== '')
+            ? $reeid_slug_to_force
+            : $title;
     };
+
     $reeid_cb_insert = static function ($data, $postarr) use (&$reeid_slug_to_force) {
         if (is_string($reeid_slug_to_force) && $reeid_slug_to_force !== '') {
             $data['post_name'] = $reeid_slug_to_force;
         }
         return $data;
     };
-    add_filter('sanitize_title', $reeid_cb_sanitize, PHP_INT_MAX, 3);
-    add_filter('wp_insert_post_data', $reeid_cb_insert, PHP_INT_MAX, 2);
 
+    add_filter('sanitize_title',       $reeid_cb_sanitize, PHP_INT_MAX, 3);
+    add_filter('wp_insert_post_data',  $reeid_cb_insert,   PHP_INT_MAX, 2);
+
+    // Safe update
     $target_id = function_exists('reeid_safe_wp_update_post')
         ? reeid_safe_wp_update_post($new_post, true)
         : wp_update_post($new_post, true);
 
-    remove_filter('sanitize_title', $reeid_cb_sanitize, PHP_INT_MAX);
-    remove_filter('wp_insert_post_data', $reeid_cb_insert, PHP_INT_MAX);
+    remove_filter('sanitize_title',      $reeid_cb_sanitize, PHP_INT_MAX);
+    remove_filter('wp_insert_post_data', $reeid_cb_insert,   PHP_INT_MAX);
     unset($reeid_slug_to_force, $reeid_cb_sanitize, $reeid_cb_insert);
 
     if (is_wp_error($target_id)) {
-        wp_send_json_error(['error' => 'update_failed', 'detail' => $target_id->get_error_message()]);
+        wp_send_json_error([
+            'error'  => 'update_failed',
+            'detail' => $target_id->get_error_message(),
+        ]);
     }
 
+    // Commit Elementor data returned by API (driven by rulepack walker)
     if (isset($result['data']) && function_exists('reeid_elementor_commit_post')) {
+        // Commit array/JSON into _elementor_data + regen CSS
         reeid_elementor_commit_post($target_id, $result['data']);
     }
-    // Ensure Elementor meta is present and cached assets are refreshed
-if (isset($result['data'])) {
-    $elem_json = is_array($result['data'])
-        ? wp_json_encode($result['data'], JSON_UNESCAPED_UNICODE)
-        : (string) $result['data'];
-    if (is_string($elem_json) && $elem_json !== '') {
-        update_post_meta($target_id, '_elementor_data', wp_slash($elem_json));
+
+    // Harden: ensure Elementor meta is present and frontend cache is refreshed
+    if (isset($result['data'])) {
+        $elem_json = is_array($result['data'])
+            ? wp_json_encode($result['data'], JSON_UNESCAPED_UNICODE)
+            : (string) $result['data'];
+
+        if (is_string($elem_json) && $elem_json !== '') {
+            update_post_meta($target_id, '_elementor_data', wp_slash($elem_json));
+        }
+
+        update_post_meta($target_id, '_elementor_edit_mode', 'builder');
+
+        // Copy template type if source has one
+        $tpl_type = get_post_meta($post_id, '_elementor_template_type', true);
+        if (!empty($tpl_type)) {
+            update_post_meta($target_id, '_elementor_template_type', $tpl_type);
+        }
+
+        if (did_action('elementor/loaded')) {
+            try {
+                \Elementor\Plugin::$instance->posts_css_manager->clear_cache($target_id);
+                \Elementor\Plugin::$instance->files_manager->clear_cache();
+            } catch (\Throwable $e) {
+                // noop
+            }
+        }
     }
-    update_post_meta($target_id, '_elementor_edit_mode', 'builder');
 
-    // Copy template type if source has one (keeps theme layout consistent)
-    $tpl_type = get_post_meta($post_id, '_elementor_template_type', true);
-    if (!empty($tpl_type)) {
-        update_post_meta($target_id, '_elementor_template_type', $tpl_type);
-    }
-
-    if (did_action('elementor/loaded')) {
-        try {
-            \Elementor\Plugin::$instance->posts_css_manager->clear_cache($target_id);
-            \Elementor\Plugin::$instance->files_manager->clear_cache();
-        } catch (\Throwable $e) { /* noop */ }
-    }
-}
-
-
-    // --- Guard: if translated title is native but saved slug reverted to ASCII, fix immediately
+    // --- Guard: if translated title contains non-ASCII but saved slug fell back to ASCII, fix now ---
     if (!is_wp_error($target_id)) {
         $title_for_slug = (string) get_post_field('post_title', $target_id);
-        $saved = get_post($target_id);
+        $saved          = get_post($target_id);
+
         if ($saved && isset($saved->post_name)) {
             $title_has_non_ascii = (bool) preg_match('/[^\x00-\x7F]/u', $title_for_slug);
             $slug_has_non_ascii  = (bool) preg_match('/[^\x00-\x7F]/u', (string) $saved->post_name);
-            if ($title_has_non_ascii && !$slug_has_non_ascii) {
+
+            if ($title_has_non_ascii && ! $slug_has_non_ascii) {
                 $native = function_exists('reeid_sanitize_native_slug')
                     ? reeid_sanitize_native_slug($title_for_slug)
                     : sanitize_title($title_for_slug);
+
                 $unique = wp_unique_post_slug(
                     $native,
                     $target_id,
@@ -7458,6 +7507,7 @@ if (isset($result['data'])) {
                     get_post_type($target_id),
                     (int) get_post_field('post_parent', $target_id)
                 );
+
                 wp_update_post([
                     'ID'        => $target_id,
                     'post_name' => $unique ?: $native,
@@ -7466,12 +7516,8 @@ if (isset($result['data'])) {
         }
     }
 
+    // Expose for SEO tail section
     $translated_slug = (string) ($result['slug'] ?? '');
-
-
-
-
-
 } else {
 
     // Gutenberg/Classic path
