@@ -8146,12 +8146,23 @@ $slug_raw = wp_unique_post_slug(
 );
 // --- END: elementor slug hardening ---
 
-                    if (! empty($result['data'])) {
-                        $decoded = is_array($result['data']) ? $result['data'] : json_decode($result['data'], true);
-                        update_post_meta($tid, '_elementor_data', $decoded);
-                        update_post_meta($tid, '_elementor_edit_mode', 'builder');
-                        update_post_meta($tid, '_elementor_template_type', 'wp-post');
+                                        if (! empty($result['data'])) {
+                        // Normalise to array first
+                        $decoded = is_array($result['data'])
+                            ? $result['data']
+                            : json_decode($result['data'], true);
+
+                        if (is_array($decoded)) {
+                            // Elementor expects JSON string in _elementor_data
+                            $json = wp_json_encode($decoded, JSON_UNESCAPED_UNICODE);
+                            if ($json !== false) {
+                                update_post_meta($tid, '_elementor_data', wp_slash($json));
+                                update_post_meta($tid, '_elementor_edit_mode', 'builder');
+                                update_post_meta($tid, '_elementor_template_type', 'wp-post');
+                            }
+                        }
                     }
+
 
                     $new_post = [
                         'ID'           => $tid,
