@@ -7462,24 +7462,14 @@ if ($editor === 'elementor') {
         ]);
     }
 
-    // Commit Elementor data returned by API (driven by rulepack walker)
+        // Commit Elementor data returned by API (driven by rulepack walker)
     if (isset($result['data']) && function_exists('reeid_elementor_commit_post')) {
-        // Commit array/JSON into _elementor_data + regen CSS
+        // Commit array/JSON into _elementor_data + regenerate CSS
         reeid_elementor_commit_post($target_id, $result['data']);
     }
 
     // Harden: ensure Elementor meta is present and frontend cache is refreshed
     if (isset($result['data'])) {
-        $elem_json = is_array($result['data'])
-            ? wp_json_encode($result['data'], JSON_UNESCAPED_UNICODE)
-            : (string) $result['data'];
-
-        if (is_string($elem_json) && $elem_json !== '') {
-            update_post_meta($target_id, '_elementor_data', wp_slash($elem_json));
-        }
-
-        update_post_meta($target_id, '_elementor_edit_mode', 'builder');
-
         // Copy template type if source has one
         $tpl_type = get_post_meta($post_id, '_elementor_template_type', true);
         if (!empty($tpl_type)) {
@@ -7495,6 +7485,7 @@ if ($editor === 'elementor') {
             }
         }
     }
+
 
     // --- Guard: if translated title contains non-ASCII but saved slug fell back to ASCII, fix now ---
     if (!is_wp_error($target_id)) {
