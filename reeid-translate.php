@@ -6571,23 +6571,25 @@ if (! function_exists('reeid_elementor_commit_post')) {
      */
     function reeid_elementor_commit_post(int $post_id, $elementor_data): void
     {
-        // 1) Store as JSON string (Elementor expects JSON; avoid serialized arrays).
+        // 1) Normalize to JSON string (Elementor expects JSON; avoid serialized arrays).
         $json = (is_array($elementor_data) || is_object($elementor_data))
-            ? wp_json_encode($elementor_data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+            ? wp_json_encode($elementor_data, JSON_UNESCAPED_UNICODE)
             : (string) $elementor_data;
 
-        update_post_meta($post_id, '_elementor_data', wp_slash($json));
-        update_post_meta($post_id, '_elementor_edit_mode', 'builder');
-        update_post_meta(
-            $post_id,
-            '_elementor_data_version',
-            defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : '3.x'
-        );
+        if ($json !== '' && $json !== false) {
+            update_post_meta($post_id, '_elementor_data', wp_slash($json));
+            update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+            update_post_meta(
+                $post_id,
+                '_elementor_data_version',
+                defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : '3.x'
+            );
 
-        // Ensure correct template type.
-        $ptype = get_post_type($post_id);
-        $tmpl  = ($ptype === 'page') ? 'wp-page' : 'wp-post';
-        update_post_meta($post_id, '_elementor_template_type', $tmpl);
+            // Ensure correct template type.
+            $ptype = get_post_type($post_id);
+            $tmpl  = ($ptype === 'page') ? 'wp-page' : 'wp-post';
+            update_post_meta($post_id, '_elementor_template_type', $tmpl);
+        }
 
         // Drop old CSS meta if it exists (legacy installations).
         delete_post_meta($post_id, '_elementor_css');
@@ -6599,11 +6601,10 @@ if (! function_exists('reeid_elementor_commit_post')) {
                 if ($doc) {
                     $arr = json_decode($json, true);
                     if (is_array($arr)) {
-                        // Save minimal payload; this triggers internal CSS regeneration pathways.
                         $doc->save([
-                            'elements'       => $arr,
-                            'settings'       => (array) $doc->get_settings(),
-                            'page_settings'  => (array) $doc->get_settings('page'),
+                            'elements'      => $arr,
+                            'settings'      => (array) $doc->get_settings(),
+                            'page_settings' => (array) $doc->get_settings('page'),
                         ]);
                     }
                 }
@@ -6616,14 +6617,22 @@ if (! function_exists('reeid_elementor_commit_post')) {
         try {
             if (class_exists('\Elementor\Core\Files\CSS\Post')) {
                 $css = new \Elementor\Core\Files\CSS\Post($post_id);
-                $css->clear_cache();
-                $css->update();
+                if (method_exists($css, 'delete')) {
+                    $css->delete();
+                }
+                if (method_exists($css, 'update')) {
+                    $css->update();
+                }
             } elseif (class_exists('\Elementor\Post_CSS_File')) {
-                // Back-compat older Elementor.
                 $css = new \Elementor\Post_CSS_File($post_id);
-                $css->clear_cache();
-                $css->update();
+                if (method_exists($css, 'delete')) {
+                    $css->delete();
+                }
+                if (method_exists($css, 'regenerate')) {
+                    $css->regenerate();
+                }
             }
+
             if (class_exists('\Elementor\Plugin')) {
                 if (isset(\Elementor\Plugin::$instance->files_manager)) {
                     \Elementor\Plugin::$instance->files_manager->clear_cache();
@@ -6640,6 +6649,7 @@ if (! function_exists('reeid_elementor_commit_post')) {
         clean_post_cache($post_id);
     }
 }
+
 
 
 /* ===========================================================
