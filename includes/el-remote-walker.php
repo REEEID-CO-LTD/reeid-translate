@@ -169,88 +169,59 @@ if (! function_exists('reeid_elementor_rewrite_via_remote_walker')) {
  * Local commit helper: writes elementor meta + triggers Elementor regen properly.
  * Kept small and safe; can be reused by places that already wrote meta.
  */
-if (! function_exists('reeid_elementor_commit_local')) {
-    function reeid_elementor_commit_local(int $post_id, $elementor_raw)
-    {
-        // ensure string
-        $json = is_string($elementor_raw)
-            ? $elementor_raw
-            : wp_json_encode($elementor_raw, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+if ( ! function_exists( 'reeid_elementor_commit_local' ) ) {
+    /**
+     * Local commit helper: writes Elementor meta and lets the main plugin
+     * handle CSS regeneration via reeid_elementor_commit_post().
+     *
+     * This keeps all Elementor saving logic in one place and avoids
+     * layout-breaking differences between local and remote flows.
+     *
+     * @param int          $post_id
+     * @param array|string $elementor_raw Array (Elementor tree) or JSON string.
+     */
+    function reeid_elementor_commit_local( int $post_id, $elementor_raw ): void {
+        // Normalise to array first.
+        if ( is_array( $elementor_raw ) ) {
+            $data = $elementor_raw;
+        } else {
+            $json = is_string( $elementor_raw )
+                ? $elementor_raw
+                : wp_json_encode( $elementor_raw, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
 
-        // IMPORTANT: store clean, un-slashed JSON
-        update_post_meta($post_id, '_elementor_data', $json);
-        update_post_meta($post_id, '_elementor_edit_mode', 'builder');
-        update_post_meta(
-            // NEW: render builder once and sync to post_content as fallback
-        if (class_exists('\\Elementor\\Plugin')) {
-            try {
-                $frontend = \Elementor\Plugin::instance()->frontend;
-
-                // ensure global $post context for builder
-                $prev_post = $GLOBALS['post'] ?? null;
-                $GLOBALS['post'] = get_post($post_id);
-
-                $html = $frontend->get_builder_content($post_id, true);
-
-                if (is_string($html) && trim($html) !== '') {
-                    wp_update_post([
-                        'ID'           => $post_id,
-                        'post_content' => $html,
-                    ]);
-                }
-
-                if ($prev_post instanceof \WP_Post) {
-                    $GLOBALS['post'] = $prev_post;
-                } else {
-                    unset($GLOBALS['post']);
-                }
-            } catch (\Throwable $e) {
-                // ignore - fallback only
-            }
+            $data = json_decode( (string) $json, true );
         }
+
+        if ( ! is_array( $data ) ) {
+            // Nothing usable to save.
+            return;
+        }
+
+        // Prefer the main plugin's Elementor saver if available.
+        if ( function_exists( 'reeid_elementor_commit_post' ) ) {
+            reeid_elementor_commit_post( $post_id, $data );
+            return;
+        }
+
+        // Fallback: minimal meta write compatible with Elementor.
+        $json = wp_json_encode( $data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES );
+        if ( ! is_string( $json ) || $json === '' ) {
+            return;
+        }
+
+        // Store as JSON string (slashed, like Elementor does).
+        update_post_meta( $post_id, '_elementor_data', wp_slash( $json ) );
+        update_post_meta( $post_id, '_elementor_edit_mode', 'builder' );
+        update_post_meta(
             $post_id,
             '_elementor_data_version',
-            defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : (string) time()
+            defined( 'ELEMENTOR_VERSION' ) ? (string) ELEMENTOR_VERSION : '3.x'
         );
 
-        // try Document->save with minimal arg array (avoid "Too few arguments")
-        try {
-            if (class_exists('\\Elementor\\Plugin') && isset(\Elementor\Plugin::instance()->documents)) {
-                $docs = \Elementor\Plugin::instance()->documents;
-                if (method_exists($docs, 'get')) {
-                    $doc = $docs->get($post_id);
-                    if ($doc && method_exists($doc, 'save')) {
-                        try {
-                            $doc->save(['post_id' => $post_id]);
-                        } catch (\Throwable $e) {
-                            if (method_exists($doc, 'update')) {
-                                $doc->update(['post_type' => get_post_type($post_id)]);
-                            }
-                        }
-                    }
-                }
-            }
-        } catch (\Throwable $e) {
-            // ignore - not fatal
-        }
-
-        // Clear caches and attempt to remove generated CSS files to force rebuild
-        if (function_exists('wp_cache_flush')) {
-            wp_cache_flush();
-        }
-        $css_dir = WP_CONTENT_DIR . '/uploads/elementor/css';
-        if (is_dir($css_dir)) {
-            try {
-                $it = new \DirectoryIterator($css_dir);
-                foreach ($it as $fi) {
-                    if ($fi->isFile() && preg_match('/^post-' . (int) $post_id . '\./', $fi->getFilename())) {
-                        @unlink($fi->getPathname());
-                    }
-                }
-            } catch (\Throwable $e) {
-                // ignore
-            }
-        }
+        $ptype = get_post_type( $post_id );
+        $tmpl  = ( $ptype === 'page' ) ? 'wp-page' : 'wp-post';
+        update_post_meta( $post_id, '_elementor_template_type', $tmpl );
     }
 }
+
 
