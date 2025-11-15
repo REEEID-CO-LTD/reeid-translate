@@ -8174,6 +8174,7 @@ $slug_raw = wp_unique_post_slug(
                         'post_author'  => $root_post->post_author,
                         'post_excerpt' => $excerpt,
                     ];
+                        
                     $tid2 = function_exists('reeid_safe_wp_update_post')
                         ? reeid_safe_wp_update_post($new_post, true)
                         : wp_update_post($new_post, true);
