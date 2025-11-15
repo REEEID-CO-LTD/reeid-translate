@@ -8178,34 +8178,24 @@ $slug_raw = wp_unique_post_slug(
 );
 // --- END: elementor slug hardening ---
 
-                                        if (! empty($result['data'])) {
-                        // Normalise to array first
-                        $decoded = is_array($result['data'])
-                            ? $result['data']
-                            : json_decode($result['data'], true);
-
-                        if (is_array($decoded)) {
-                            // Elementor expects JSON string in _elementor_data
-                            $json = wp_json_encode($decoded, JSON_UNESCAPED_UNICODE);
-                            if ($json !== false) {
-                                update_post_meta($tid, '_elementor_data', wp_slash($json));
-                                update_post_meta($tid, '_elementor_edit_mode', 'builder');
-                                update_post_meta($tid, '_elementor_template_type', 'wp-post');
-                            }
-                        }
+                    if (! empty($result['data']) && function_exists('reeid_elementor_commit_post')) {
+                        // Use shared committer: writes _elementor_data, sets meta, regenerates CSS
+                        reeid_elementor_commit_post($tid, $result['data']);
                     }
+
 
 
                     $new_post = [
                         'ID'           => $tid,
                         'post_title'   => $title,
-                        'post_content' => $content,
+                        // Elementor: content lives in _elementor_data; keep existing post_content
                         'post_status'  => $mode,
                         'post_type'    => $root_post->post_type,
                         'post_name'    => $slug_raw,
                         'post_author'  => $root_post->post_author,
                         'post_excerpt' => $excerpt,
                     ];
+
                         
                     $tid2 = function_exists('reeid_safe_wp_update_post')
                         ? reeid_safe_wp_update_post($new_post, true)
