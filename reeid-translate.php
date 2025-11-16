@@ -9576,24 +9576,41 @@ wp_enqueue_script( 'reeid-elementor-wires' );
         $pagename = get_query_var('pagename', '');
         $the_slug = $slug ?: $pagename;
 
-        if ($the_slug && $code) {
-            // Meta query is necessary here to match the post to its translation language code.
-            // Only one post is ever fetched. This is not run on every page load, only when resolving a translation.
-            $found = get_posts([
-                'name'           => $the_slug,
+                if ($the_slug && $code) {
+            // Step 1: get all posts/pages in this language
+            $candidates = get_posts([
                 'post_type'      => ['post', 'page'],
                 'meta_key'       => '_reeid_translation_lang',
                 'meta_value'     => $code,
-                'posts_per_page' => 1,
+                'posts_per_page' => 50,
                 'no_found_rows'  => true,
             ]);
-            if (empty($found)) {
+
+            if (empty($candidates)) {
                 $busy = false;
                 return;
             }
 
-            $target = $found[0];
-            $id     = (int) $target->ID;
+            // Step 2: try to match by exact slug in PHP
+            $target = null;
+            foreach ($candidates as $p) {
+                if ((string) $p->post_name === (string) $the_slug) {
+                    $target = $p;
+                    break;
+                }
+            }
+
+            // Fallback: if we only have one candidate for this language, use it
+            if (! $target && count($candidates) === 1) {
+                $target = $candidates[0];
+            }
+
+            if (! $target) {
+                $busy = false;
+                return;
+            }
+
+            $id = (int) $target->ID;
 
             if ($target->post_type === 'page') {
                 $q->set('page_id', $id);
@@ -9613,7 +9630,7 @@ wp_enqueue_script( 'reeid-elementor-wires' );
                         'key'     => '_reeid_translation_lang',
                         'value'   => $code,
                         'compare' => '=',
-                    ]
+                    ],
                 ]);
                 $q->is_single     = true;
                 $q->is_singular   = true;
@@ -9622,6 +9639,7 @@ wp_enqueue_script( 'reeid-elementor-wires' );
                 $q->is_home       = false;
             }
         }
+
 
         $busy = false;
     });
