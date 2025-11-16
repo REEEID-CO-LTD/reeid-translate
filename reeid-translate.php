@@ -7139,28 +7139,46 @@ $prompt = $system_prompt;
                 $res = reeid_elementor_translate_json($post_id, $src_lang, $target_lang, $tone, $prompt);
 
 // REEID: auto-inject elementor 'data' into _elementor_data for translated post (non-destructive)
-$__reeid_inject_target = (isset($tid) && $tid) ? $tid : (isset($translated_post_id) && $translated_post_id ? $translated_post_id : $post_id);
+$__reeid_inject_target = (isset($tid) && $tid)
+    ? $tid
+    : ((isset($translated_post_id) && $translated_post_id) ? $translated_post_id : $post_id);
+
 if (! empty($res['data']) && is_array($res['data'])) {
-    $json = wp_json_encode($res['data']);
-    if ($json !== false) {
-        update_post_meta($__reeid_inject_target, '_elementor_data', wp_slash($json));
-        // keep a simple version stamp so other code knows data changed
-        update_post_meta($__reeid_inject_target, '_elementor_data_version', (string) time());
-        // defensive: attempt to clear Elementor document caches if available
-        if (class_exists('\Elementor\Plugin')) {
-            try {
-                $docs = \Elementor\Plugin::instance()->documents ?? null;
-                if ($docs && method_exists($docs, 'clear_doc_caches')) {
-                    $docs->clear_doc_caches($__reeid_inject_target);
-                } elseif ($docs && method_exists($docs, 'clear_cache')) {
-                    $docs->clear_cache($__reeid_inject_target);
-                }
-            } catch (Throwable $e) {
-                // intentionally ignore cache-clear failures
+    // Prefer the dedicated Elementor saver so edit_mode/template/meta are consistent.
+    if (function_exists('reeid_el_save_json')) {
+        reeid_el_save_json($__reeid_inject_target, $res['data']);
+    } elseif (function_exists('reeid_elementor_commit_post')) {
+        // Fallback to the other helper if present.
+        reeid_elementor_commit_post($__reeid_inject_target, $res['data']);
+    } else {
+        // Last-resort: minimal meta write, but make sure we mark as builder.
+        $json = wp_json_encode($res['data'], JSON_UNESCAPED_UNICODE);
+        if ($json !== false) {
+            update_post_meta($__reeid_inject_target, '_elementor_data', wp_slash($json));
+            update_post_meta($__reeid_inject_target, '_elementor_edit_mode', 'builder');
+            update_post_meta(
+                $__reeid_inject_target,
+                '_elementor_data_version',
+                defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : (string) time()
+            );
+        }
+    }
+
+    // (Optional) Keep the documents cache clear for legacy paths – safe no-op if not needed.
+    if (class_exists('\Elementor\Plugin')) {
+        try {
+            $docs = \Elementor\Plugin::instance()->documents ?? null;
+            if ($docs && method_exists($docs, 'clear_doc_caches')) {
+                $docs->clear_doc_caches($__reeid_inject_target);
+            } elseif ($docs && method_exists($docs, 'clear_cache')) {
+                $docs->clear_cache($__reeid_inject_target);
             }
+        } catch (\Throwable $e) {
+            // intentionally ignore cache-clear failures
         }
     }
 }
+
 
                 if (empty($res['success'])) {
                     if (function_exists('reeid_debug_log')) {
