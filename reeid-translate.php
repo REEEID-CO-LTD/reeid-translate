@@ -7513,52 +7513,65 @@ if ($editor === 'elementor') {
         ]);
     }
 
-        // Commit Elementor data returned by API (driven by rulepack walker)
-if (isset($result['data']) && function_exists('reeid_elementor_commit_post')) {
-    // Commit array/JSON into _elementor_data + regenerate CSS
-    reeid_elementor_commit_post($target_id, $result['data']);
-}
+            // Elementor branch: commit translated tree + ensure meta and CSS
+    if (isset($result['data'])) {
 
-// Harden: ensure Elementor meta is present and frontend cache is refreshed
-if (isset($result['data'])) {
+        // 1) Prefer the dedicated saver so JSON + meta + CSS are consistent
+        if (function_exists('reeid_elementor_commit_post')) {
+            reeid_elementor_commit_post($target_id, $result['data']);
 
-    // Copy Elementor template type if source has one
-    $tpl_type = get_post_meta($post_id, '_elementor_template_type', true);
-    if (!empty($tpl_type)) {
-        update_post_meta($target_id, '_elementor_template_type', $tpl_type);
-    }
+        } else {
+            // 2) Fallback: minimal meta write with proper JSON + slashing
+            $elem_json = is_array($result['data'])
+                ? wp_json_encode($result['data'], JSON_UNESCAPED_UNICODE)
+                : (string) $result['data'];
 
-    // Copy Astra layout-related meta so containers / widths match the source page
-    $astra_meta_keys = [
-        'site-content-layout',
-        'ast-site-content-layout',
-        'site-sidebar-layout',
-        'ast-title-bar-display',
-        'ast-featured-img',
-    ];
+            if (is_string($elem_json) && $elem_json !== '') {
+                update_post_meta($target_id, '_elementor_data', wp_slash($elem_json));
+            }
 
-    foreach ($astra_meta_keys as $meta_key) {
-        $val = get_post_meta($post_id, $meta_key, true);
-        // Only copy when source has an explicit value
-        if ($val !== '' && $val !== null) {
-            update_post_meta($target_id, $meta_key, $val);
+            update_post_meta($target_id, '_elementor_edit_mode', 'builder');
+
+            $ptype = get_post_type($target_id);
+            $tmpl  = ($ptype === 'page') ? 'wp-page' : 'wp-post';
+            update_post_meta($target_id, '_elementor_template_type', $tmpl);
+
+            $ver = get_option('elementor_version');
+            if (! $ver && defined('ELEMENTOR_VERSION')) {
+                $ver = ELEMENTOR_VERSION;
+            }
+            if ($ver) {
+                update_post_meta($target_id, '_elementor_data_version', $ver);
+            }
+        }
+
+        // 3) Copy template type from source if it exists (Astra & co)
+        $tpl_type = get_post_meta($post_id, '_elementor_template_type', true);
+        if (!empty($tpl_type)) {
+            update_post_meta($target_id, '_elementor_template_type', $tpl_type);
+        }
+
+        // 4) Clear Elementor caches defensively & version-safe
+        if (did_action('elementor/loaded')) {
+            try {
+                if (class_exists('\Elementor\Core\Files\CSS\Post')) {
+                    $css = new \Elementor\Core\Files\CSS\Post($target_id);
+                    if (method_exists($css, 'delete')) {
+                        $css->delete();
+                    }
+                    if (method_exists($css, 'update')) {
+                        $css->update();
+                    }
+                }
+
+                if (isset(\Elementor\Plugin::$instance->files_manager)) {
+                    \Elementor\Plugin::$instance->files_manager->clear_cache();
+                }
+            } catch (\Throwable $e) {
+                // ignore cache errors
+            }
         }
     }
-
-    // Refresh Elementor caches so the new layout + CSS is applied on frontend
-    if (did_action('elementor/loaded')) {
-        try {
-            if (isset(\Elementor\Plugin::$instance->posts_css_manager)) {
-                \Elementor\Plugin::$instance->posts_css_manager->clear_cache($target_id);
-            }
-            if (isset(\Elementor\Plugin::$instance->files_manager)) {
-                \Elementor\Plugin::$instance->files_manager->clear_cache();
-            }
-        } catch (\Throwable $e) {
-            // noop
-        }
-    }
-}
 
 
 
