@@ -3770,9 +3770,51 @@ $payload = [
             return ['success' => false, 'error' => 'Missing translation in API response', 'where' => 'api_bad_payload', 'snippet' => mb_substr($rawBody, 0, 1200, 'UTF-8')];
         }
 
-        $tr        = (array) $json['translation'];
+              $json = json_decode($rawBody, true);
+        if (! is_array($json)) {
+            return ['success' => false, 'error' => 'API response not JSON', 'where' => 'api_bad_json', 'snippet' => mb_substr($rawBody, 0, 1000, 'UTF-8')];
+        }
+        reeid__s13_log('resp_keys', array_keys($json));
+        if (isset($json['ok']) && ! $json['ok']) {
+            return ['success' => false, 'error' => (string) ($json['error'] ?? 'API error'), 'where' => 'api_error', 'snippet' => mb_substr($rawBody, 0, 1000, 'UTF-8')];
+        }
+        if (empty($json['translation']) || ! is_array($json['translation'])) {
+            return ['success' => false, 'error' => 'Missing translation payload', 'where' => 'bad_payload', 'snippet' => mb_substr($rawBody, 0, 1200, 'UTF-8')];
+        }
+
+        // 4.x) Decode translation payload
+        $tr = (array) $json['translation'];
+
+        // === DEBUG: log raw API answer for Elementor S13 ===
+        try {
+            $dbg = [
+                'ts'          => gmdate('c'),
+                'post_id'     => $post_id,
+                'source_lang' => $source_lang,
+                'target_lang' => $target_lang,
+                'api_title'   => isset($tr['title']) ? $tr['title'] : null,
+                'api_slug'    => isset($tr['slug']['preferred']) ? $tr['slug']['preferred'] : null,
+                'api_slug_all'=> isset($tr['slug']) ? $tr['slug'] : null,
+            ];
+
+            if (isset($tr['paths']) && is_array($tr['paths'])) {
+                // log only first few to keep file small
+                $dbg['paths_sample'] = array_slice($tr['paths'], 0, 3, true);
+            }
+
+            @file_put_contents(
+                WP_CONTENT_DIR . '/uploads/reeid-el-api-debug.log',
+                json_encode($dbg, JSON_UNESCAPED_UNICODE) . "\n",
+                FILE_APPEND
+            );
+        } catch (\Throwable $e) {
+            // ignore logging errors
+        }
+        // === /DEBUG ===
+
         $title_out = (string) ($tr['title'] ?? $post->post_title);
         reeid__s13_log('tr_keys', array_keys($tr));
+
 
         // 5) Build translated Elementor tree
         $data_out = null;
