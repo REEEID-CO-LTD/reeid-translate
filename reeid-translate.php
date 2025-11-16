@@ -6615,90 +6615,73 @@ if (! function_exists('reeid_elementor_commit_post')) {
      */
     function reeid_elementor_commit_post(int $post_id, $elementor_data): void
     {
-        // 1) Store as JSON string (Elementor expects JSON; avoid serialized arrays).
-        $json = (is_array($elementor_data) || is_object($elementor_data))
-            ? wp_json_encode($elementor_data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-            : (string) $elementor_data;
+        // Normalize to JSON string
+        if (is_array($elementor_data)) {
+            $json = wp_json_encode($elementor_data, JSON_UNESCAPED_UNICODE);
+        } else {
+            $json = (string) $elementor_data;
+        }
 
         if (! is_string($json) || $json === '') {
             return;
         }
 
+        // Store JSON in meta with proper slashing
         update_post_meta($post_id, '_elementor_data', wp_slash($json));
-        update_post_meta(
-            $post_id,
-            '_elementor_data_version',
-            defined('ELEMENTOR_VERSION') ? (string) ELEMENTOR_VERSION : '3.x'
-        );
 
-        // Ensure correct template type.
+        // Ensure Elementor builder meta is set
+        update_post_meta($post_id, '_elementor_edit_mode', 'builder');
+
         $ptype = get_post_type($post_id);
         $tmpl  = ($ptype === 'page') ? 'wp-page' : 'wp-post';
         update_post_meta($post_id, '_elementor_template_type', $tmpl);
 
-        // Drop old CSS meta if it exists (legacy installations).
-        delete_post_meta($post_id, '_elementor_css');
-
-        // 2) Try to use Elementor's document save to trigger internal rebuilds.
-        try {
-            if (class_exists('\Elementor\Plugin')) {
-                $doc = \Elementor\Plugin::$instance->documents->get($post_id);
-                if ($doc) {
-                    $arr = json_decode($json, true);
-                    if (is_array($arr)) {
-                        // Save minimal payload; this triggers internal CSS regeneration pathways.
-                        $doc->save([
-                            'elements'      => $arr,
-                            'settings'      => (array) $doc->get_settings(),
-                            'page_settings' => (array) $doc->get_settings('page'),
-                        ]);
-                    }
-                }
-            }
-        } catch (\Throwable $e) {
-            // If Elementor internals change, fall back to manual CSS generation.
+        // Keep/clone page settings (layout, width, etc.)
+        $ps = get_post_meta($post_id, '_elementor_page_settings', true);
+        if (is_array($ps) || is_object($ps)) {
+            update_post_meta($post_id, '_elementor_page_settings', $ps);
         }
 
-        // 3) Regenerate post CSS (covers cases where document save path did not fire).
-        try {
-            if (class_exists('\Elementor\Core\Files\CSS\Post')) {
-                $css = new \Elementor\Core\Files\CSS\Post($post_id);
+        // Data version: prefer Elementor version, fallback to timestamp
+        $ver = get_option('elementor_version');
+        if (! $ver && defined('ELEMENTOR_VERSION')) {
+            $ver = ELEMENTOR_VERSION;
+        }
+        update_post_meta(
+            $post_id,
+            '_elementor_data_version',
+            $ver ? (string) $ver : (string) time()
+        );
 
-                // Newer Elementor uses delete()/update()
-                if (method_exists($css, 'delete')) {
-                    $css->delete();
-                } elseif (method_exists($css, 'clear_cache')) {
-                    // Older versions: keep back-compat if present.
-                    $css->clear_cache();
+        // Clean legacy CSS meta
+        delete_post_meta($post_id, '_elementor_css');
+
+        // Regenerate CSS in a version-safe way
+        if (did_action('elementor/loaded')) {
+            try {
+                if (class_exists('\Elementor\Core\Files\CSS\Post')) {
+                    $css = new \Elementor\Core\Files\CSS\Post($post_id);
+
+                    if (method_exists($css, 'delete')) {
+                        $css->delete();
+                    }
+
+                    if (method_exists($css, 'update')) {
+                        $css->update();
+                    }
                 }
 
-                if (method_exists($css, 'update')) {
-                    $css->update();
+                // Global cache clear – safe across Elementor versions
+                if (isset(\Elementor\Plugin::$instance->files_manager)) {
+                    \Elementor\Plugin::$instance->files_manager->clear_cache();
                 }
-            } elseif (class_exists('\Elementor\Post_CSS_File')) {
-                // Back-compat older Elementor.
-                $css = new \Elementor\Post_CSS_File($post_id);
-
-                if (method_exists($css, 'delete')) {
-                    $css->delete();
-                } elseif (method_exists($css, 'clear_cache')) {
-                    $css->clear_cache();
-                }
-
-                if (method_exists($css, 'update')) {
-                    $css->update();
-                }
+            } catch (\Throwable $e) {
+                // Silently ignore CSS regen failures
             }
-
-            // Global Elementor file cache clear (safe, version-checked).
-            if (class_exists('\Elementor\Plugin') && isset(\Elementor\Plugin::$instance->files_manager)) {
-                \Elementor\Plugin::$instance->files_manager->clear_cache();
-            }
-        } catch (\Throwable $e) {
-            // Swallow errors: CSS generation failure should not fatal the request.
         }
     }
 }
+
 
 
 
