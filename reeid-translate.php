@@ -8727,9 +8727,9 @@ wp_enqueue_script( 'reeid-elementor-wires' );
     }
 
 /*===========================================================================
-  SECTION 26 : FINAL REWRITE 
+  SECTION 26 : FINAL REWRITE
   (LANGUAGE-PREFIXED URLs with native-slug decoding + Unicode query slugs)
- ===========================================================================*/
+===========================================================================*/
 
     // 1) Add our custom query var for language codes
     add_filter('query_vars', function ($vars) {
@@ -8737,7 +8737,7 @@ wp_enqueue_script( 'reeid-elementor-wires' );
         return $vars;
     }, 10, 1);
 
-    // 2) Decode percent-encoded slugs 
+    // 2) Decode percent-encoded slugs
     add_filter('request', function ($vars) {
         if (! empty($vars['reeid_lang_code']) && ! empty($vars['name'])) {
             $vars['name'] = rawurldecode($vars['name']);
@@ -8755,44 +8755,61 @@ wp_enqueue_script( 'reeid-elementor-wires' );
 
     // 3) Inject language-prefix rules at the top of WP's rewrite rules
     add_filter('rewrite_rules_array', function ($rules) {
-        //reeid_debug_log( 'REWRITE_RULES_IN', array_slice( $rules, 0, 5, true ) );
 
-        $raw = function_exists('reeid_get_enabled_languages')
-            ? reeid_get_enabled_languages()
-            : array('en' => 'English', 'zh' => '中文', 'ar' => 'العربية');
-
-        // Normalize as code list
+        //------------------------------------------------------------------
+        // Determine which language codes should receive rewrite rules
+        // (Routing MUST follow license capability, not bulk selections)
+        //------------------------------------------------------------------
         $langs = [];
-        if (is_array($raw)) {
-            $keys = array_keys($raw);
-            $langs = ($keys === range(0, count($raw) - 1)) ? array_values($raw) : $keys;
-        } else {
-            $langs = ['en', 'zh', 'ar'];
-        }
-        //reeid_debug_log( 'LANG_LIST', $langs );
 
+        // PRO license → ALL supported languages
+        if (
+            function_exists('reeid_is_premium') &&
+            function_exists('reeid_get_supported_languages') &&
+            reeid_is_premium()
+        ) {
+            $langs = array_keys((array) reeid_get_supported_languages());
+        }
+
+        // Free license → allowed set only
+        elseif (function_exists('reeid_get_allowed_languages')) {
+            $langs = array_keys((array) reeid_get_allowed_languages());
+        }
+
+        // Last fallback (should never be needed)
+        elseif (function_exists('reeid_get_supported_languages')) {
+            $langs = array_keys((array) reeid_get_supported_languages());
+        }
+
+        // Sanitize & dedupe
+        $langs = array_values(array_unique(array_map(static function ($l) {
+            $l = strtolower(trim((string)$l));
+            return preg_replace('/[^a-z0-9\-_]/i', '', $l);
+        }, $langs)));
+
+        //------------------------------------------------------------------
+        // Build rewrite rules:  /{lang}/{slug}/  → sets query var + slug
+        //------------------------------------------------------------------
         $new = [];
         foreach ($langs as $lang) {
             $pattern = "^{$lang}/([^/]+)/?$";
             $query   = "index.php?name=\$matches[1]&reeid_lang_code={$lang}";
             $new[$pattern] = $query;
-            //reeid_debug_log( 'ADD_RULE', compact( 'lang', 'pattern', 'query' ) );
         }
 
-        $merged = $new + $rules;
-        //reeid_debug_log( 'REWRITE_RULES_OUT', array_slice( $merged, 0, 5, true ) );
-        return $merged;
+        // Place our rules at the top
+        return $new + $rules;
     }, 10, 1);
 
     // 4) Prefix all translated permalinks with /{lang}/{decoded-slug}/
     add_filter('post_link', 'reeid_prefix_permalink', 10, 2);
     add_filter('page_link', 'reeid_prefix_permalink', 10, 2);
+
     function reeid_prefix_permalink($permalink, $post)
     {
         if (! is_object($post)) {
             $post = get_post($post);
             if (! $post) {
-                //reeid_debug_log( 'PERMALINK_NO_POST', func_get_args() );
                 return $permalink;
             }
         }
@@ -8805,7 +8822,6 @@ wp_enqueue_script( 'reeid-elementor-wires' );
 
         // Decode percent-encoding so native characters remain
         $decoded = rawurldecode($post->post_name);
-        //reeid_debug_log( 'PREFIX_SLUG', array( 'lang' => $lang, 'decoded' => $decoded ) );
 
         $home = untrailingslashit(home_url());
         return "{$home}/{$lang}/{$decoded}/";
