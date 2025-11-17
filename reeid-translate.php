@@ -8908,30 +8908,13 @@ wp_enqueue_script( 'reeid-elementor-wires' );
         return $vars;
     }, 10, 1);
 
-        // 2) Decode percent-encoded slugs 
+    // 2) Decode percent-encoded slugs
     add_filter('request', function ($vars) {
         if (! empty($vars['reeid_lang_code']) && ! empty($vars['name'])) {
-            // Always decode name for native-script slugs
             $vars['name'] = rawurldecode($vars['name']);
-
-            // If WP has not locked post_type yet (or set it to "any"),
-            // and a PAGE exists with this slug, treat it as a page query.
-            $post_type = isset($vars['post_type']) ? $vars['post_type'] : '';
-
-            if ($post_type === '' || $post_type === 'any') {
-                $page = get_page_by_path($vars['name'], OBJECT, 'page');
-                if ($page instanceof WP_Post) {
-                    // Switch query to page mode
-                    $vars['pagename']  = $vars['name'];
-                    $vars['post_type'] = 'page';
-                    unset($vars['name']);
-                }
-            }
         }
-
         return $vars;
     }, 10, 1);
-
 
     // 2a) Allow Unicode slug in the “name” query var
     add_filter('sanitize_title_for_query', function ($title, $raw_title, $context) {
@@ -8975,19 +8958,13 @@ wp_enqueue_script( 'reeid-elementor-wires' );
             return preg_replace('/[^a-z0-9\-_]/i', '', $l);
         }, $langs)));
 
-                //------------------------------------------------------------------
+        //------------------------------------------------------------------
         // Build rewrite rules:  /{lang}/{slug}/  → sets query var + slug
         //------------------------------------------------------------------
         $new = [];
         foreach ($langs as $lang) {
-            // Match: /fr/some-slug/  → $matches[1] = "some-slug"
             $pattern = "^{$lang}/([^/]+)/?$";
-
-            // IMPORTANT:
-            // - Set BOTH pagename and name so pages resolve in "page mode"
-            // - Keep reeid_lang_code so the rest of the plugin knows the lang
-            $query   = "index.php?pagename=\$matches[1]&name=\$matches[1]&reeid_lang_code={$lang}";
-
+            $query   = "index.php?name=\$matches[1]&reeid_lang_code={$lang}";
             $new[$pattern] = $query;
         }
 
@@ -8995,9 +8972,7 @@ wp_enqueue_script( 'reeid-elementor-wires' );
         return $new + $rules;
     }, 10, 1);
 
-    //------------------------------------------------------------------
-    // Prefix all translated permalinks with /{lang}/{decoded-slug}/
-    //------------------------------------------------------------------
+    // 4) Prefix all translated permalinks with /{lang}/{decoded-slug}/
     add_filter('post_link', 'reeid_prefix_permalink', 10, 2);
     add_filter('page_link', 'reeid_prefix_permalink', 10, 2);
 
