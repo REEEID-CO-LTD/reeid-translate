@@ -656,59 +656,6 @@ if (!function_exists('reeid_debug_log')) {
     }
 }
 
-/*===========================================================================
-  TEMP: MAIN QUERY FLAG LOGGER FOR ELEMENTOR LAYOUT DEBUG
-  - Logs how WP sees EN/FR Elementor test pages (15148, 21345)
-  - Only runs when REEID_DEBUG is true
-===========================================================================*/
-if (!function_exists('reeid_log_main_query_flags')) {
-    function reeid_log_main_query_flags()
-    {
-        if (!defined('REEID_DEBUG') || !REEID_DEBUG) {
-            return;
-        }
-
-        global $wp_query;
-
-        $qid = get_queried_object_id();
-        if (!$qid) {
-            return;
-        }
-
-        // Restrict to our test pages only
-        $watched_ids = [15148, 21345];
-        if (!in_array((int) $qid, $watched_ids, true)) {
-            return;
-        }
-
-        $post_type = get_post_type($qid);
-        $lang_meta = get_post_meta($qid, '_reeid_translation_lang', true);
-        $lang_qv   = get_query_var('reeid_lang_code');
-
-        $flags = [
-            'request_uri'       => isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '',
-            'queried_id'        => $qid,
-            'post_type'         => $post_type,
-            'lang_meta'         => $lang_meta,
-            'lang_query_var'    => $lang_qv,
-            'is_page'           => is_page(),
-            'is_single'         => is_single(),
-            'is_singular'       => is_singular(),
-            'is_singular_page'  => is_singular('page'),
-            'is_singular_post'  => is_singular('post'),
-            'is_front_page'     => is_front_page(),
-            'query_vars'        => is_object($wp_query) ? $wp_query->query_vars : null,
-        ];
-
-        if (function_exists('reeid_debug_log')) {
-            reeid_debug_log('main_query_flags', $flags);
-        }
-    }
-
-    add_action('template_redirect', 'reeid_log_main_query_flags', 9);
-}
-
-
 /** Verify a nonce coming from GET safely. */
 if (!function_exists('reeid_verify_get_nonce')) {
     function reeid_verify_get_nonce($action, $param = '_wpnonce')
@@ -8782,11 +8729,23 @@ wp_enqueue_script( 'reeid-elementor-wires' );
 
     // 2) Decode percent-encoded slugs
     add_filter('request', function ($vars) {
-        if (! empty($vars['reeid_lang_code']) && ! empty($vars['name'])) {
-            $vars['name'] = rawurldecode($vars['name']);
+    if (! empty($vars['reeid_lang_code']) && ! empty($vars['name'])) {
+        $decoded = rawurldecode($vars['name']);
+        $vars['name'] = $decoded;
+
+        // If this slug corresponds to a PAGE, force WordPress to treat it as a page,
+        // not a blog/single. This keeps Astra in "page builder" layout instead of blog layout.
+        if (function_exists('get_page_by_path')) {
+            $page = get_page_by_path($decoded);
+            if ($page && $page->post_type === 'page') {
+                $vars['pagename'] = $decoded;
+                unset($vars['name']); // avoid single/blog resolution
+            }
         }
-        return $vars;
-    }, 10, 1);
+    }
+    return $vars;
+}, 10, 1);
+
 
     // 2a) Allow Unicode slug in the “name” query var
     add_filter('sanitize_title_for_query', function ($title, $raw_title, $context) {
@@ -8869,6 +8828,8 @@ wp_enqueue_script( 'reeid-elementor-wires' );
         $home = untrailingslashit(home_url());
         return "{$home}/{$lang}/{$decoded}/";
     }
+
+
 
 
  /*==============================================================================
@@ -16030,6 +15991,22 @@ if (!function_exists('reeid_elementor_collect_text_map_via_api_then_local')) {
             }
         }
 
-        return $map;
+// Never translate structural CSS/layout controls, they break Elementor layouts if changed
+    $forbidden_suffixes = [
+        '/settings/flex_direction',
+    ];
+
+    foreach ($map as $path => $value) {
+        foreach ($forbidden_suffixes as $suffix) {
+            $len = strlen($suffix);
+            if ($len > 0 && substr($path, -$len) === $suffix) {
+                unset($map[$path]);
+                break;
+            }
+        }
     }
+
+    return $map;
 }
+}
+
