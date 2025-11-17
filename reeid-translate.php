@@ -14782,6 +14782,47 @@ if ( ! function_exists('reeid_resolve_lang_from_request') ) {
  *
  * We replace the callbacks on the default tabs instead of injecting HTML into content.
  */
+if (! function_exists('reeid_strip_attrs_from_content')) {
+    /**
+     * Strip WooCommerce attributes markup from HTML so the Description tab
+     * never shows the attributes table.
+     *
+     * Scope: used only for single-product Description panel.
+     */
+    function reeid_strip_attrs_from_content($html)
+    {
+        if (! is_string($html) || $html === '') {
+            return $html;
+        }
+
+        // 1) Remove our own debug wrapper if present
+        $html = preg_replace(
+            '#<div[^>]+id=(["\'])reeid-debug-attrs-wrapper\1[^>]*>[\s\S]*?</div>#i',
+            '',
+            $html
+        );
+
+        // 2) Remove any attributes TABLE by Woo classes
+        //    - <table class="woocommerce-product-attributes ...">
+        //    - <table class="shop_attributes ...">
+        $html = preg_replace(
+            '#<table[^>]*\bclass=["\'][^"\']*(?:woocommerce-product-attributes|shop_attributes)[^"\']*["\'][^>]*>[\s\S]*?</table>#i',
+            '',
+            $html
+        );
+
+        // 3) Extra safety: remove generic containers that might wrap attributes
+        //    (some themes wrap them in div/section/dl with same classes)
+        $html = preg_replace(
+            '#<(div|section|dl)[^>]*\bclass=["\'][^"\']*(?:woocommerce-product-attributes|shop_attributes)[^"\']*["\'][^>]*>[\s\S]*?</\1>#i',
+            '',
+            $html
+        );
+
+        return $html;
+    }
+}
+
 add_filter('woocommerce_product_tabs', function ($tabs) {
     if (is_admin() || (function_exists('wp_doing_ajax') && wp_doing_ajax()) || (function_exists('wp_is_json_request') && wp_is_json_request())) {
         return $tabs;
