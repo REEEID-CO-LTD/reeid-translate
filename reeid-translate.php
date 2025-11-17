@@ -1228,6 +1228,32 @@ if (! function_exists('reeid_get_enabled_language_codes')) {
     }
 }
 
+
+/*==============================================================================
+  SECTION XX: SEO + WooCommerce Hreflang Bridge Loader
+==============================================================================*/
+
+$reeid_seo_dir = __DIR__ . '/includes';
+
+$reeid_seo_files = array(
+    $reeid_seo_dir . '/reeid-hreflang-bridge.php',
+    $reeid_seo_dir . '/rt-wc-i18n-lite.php',
+    $reeid_seo_dir . '/seo-sync.php',
+    $reeid_seo_dir . '/wc-inline.php',
+    $reeid_seo_dir . '/reeid-focuskw-sync.php',
+);
+
+foreach ($reeid_seo_files as $reeid_file) {
+    if (is_string($reeid_file) && file_exists($reeid_file)) {
+        require_once $reeid_file;
+    }
+}
+
+unset($reeid_seo_dir, $reeid_seo_files, $reeid_file);
+
+
+
+
 /*==============================================================================
   SECTION 6: ACTIVATION & DEACTIVATION
 ==============================================================================*/
