@@ -14548,36 +14548,6 @@ if (! function_exists('reeid_strip_wc_attrs_from_description_tab')) {
     add_filter('the_content', 'reeid_strip_wc_attrs_from_description_tab', 999);
 }
 
-/**
- * Ensure WooCommerce product tabs open on Description by default.
- * We do NOT change callbacks, only priorities / order.
- */
-if (! function_exists('reeid_wc_force_description_first_tab')) {
-    function reeid_wc_force_description_first_tab($tabs)
-    {
-        if (! is_array($tabs)) {
-            return $tabs;
-        }
-
-        // Force Description first
-        if (isset($tabs['description'])) {
-            $tabs['description']['priority'] = 5;
-        }
-
-        // Force Additional information after Description
-        if (isset($tabs['additional_information'])) {
-            // Make sure it comes after description
-            $tabs['additional_information']['priority'] = 15;
-        }
-
-        // WooCommerce will sort by priority in its template
-        return $tabs;
-    }
-
-    // Run late so we override theme / other plugins ordering
-    add_filter('woocommerce_product_tabs', 'reeid_wc_force_description_first_tab', 99);
-}
-
 
 /**
  * Force WooCommerce long description to use REEID packet on the frontend
