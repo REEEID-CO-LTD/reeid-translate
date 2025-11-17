@@ -14843,42 +14843,7 @@ if (! function_exists('reeid_wc_tab_additional_information')) {
     }
 }
 
-/**
- * Normalize WooCommerce product tabs:
- *  - Ensure Description & Additional information tabs exist.
- *  - Force our callbacks so attributes live only in Additional information.
- */
-add_filter('woocommerce_product_tabs', function ($tabs) {
-    global $product;
 
-    if (! $product instanceof \WC_Product) {
-        return $tabs;
-    }
-
-    // Ensure Description tab exists
-    if (empty($tabs['description'])) {
-        $tabs['description'] = [
-            'title'    => __('Description', 'woocommerce'),
-            'priority' => 10,
-            'callback' => 'reeid_wc_tab_description',
-        ];
-    } else {
-        $tabs['description']['callback'] = 'reeid_wc_tab_description';
-    }
-
-    // Ensure Additional information tab exists
-    if (empty($tabs['additional_information'])) {
-        $tabs['additional_information'] = [
-            'title'    => __('Additional information', 'woocommerce'),
-            'priority' => 20,
-            'callback' => 'reeid_wc_tab_additional_information',
-        ];
-    } else {
-        $tabs['additional_information']['callback'] = 'reeid_wc_tab_additional_information';
-    }
-
-    return $tabs;
-}, 50);
 
 
 
