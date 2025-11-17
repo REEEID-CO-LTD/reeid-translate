@@ -977,7 +977,6 @@ if (! function_exists('reeid_is_premium')) {
 /**
  * Returns all supported languages (code => label).
  */
-
 if (! function_exists('reeid_get_supported_languages')) {
     function reeid_get_supported_languages()
     {
@@ -1008,7 +1007,7 @@ if (! function_exists('reeid_get_supported_languages')) {
             'lo'    => 'Lao',
             'mr'    => 'Marathi',
             'ms'    => 'Malay',
-            'my'    => 'Burmese',       
+            'my'    => 'Burmese',
             'nb'    => 'Norwegian',
             'ne'    => 'Nepali',
             'nl'    => 'Dutch',
@@ -1070,13 +1069,12 @@ if (! function_exists('reeid_get_language_flags')) {
             'lo'    => 'la',
             'mr'    => 'in',
             'ms'    => 'my', // Malaysia
-            'my'    => 'mm', // Myanmar (Burmese) — NEW
+            'my'    => 'mm', // Myanmar (Burmese)
             'nb'    => 'no',
             'ne'    => 'np',
             'nl'    => 'nl',
             'pl'    => 'pl',
-            'pt'    => 'pt',
-            'pt'    => 'br',
+            'pt'    => 'pt', // Portugal/Brazil shared
             'ro'    => 'ro',
             'ru'    => 'ru',
             'si'    => 'lk',
@@ -1097,115 +1095,44 @@ if (! function_exists('reeid_get_language_flags')) {
     }
 }
 
-// /**
-//  * Resolve an incoming language/locale to your canonical supported key.
-//  */
-// if (! function_exists('reeid_resolve_language_code')) {
-//     function reeid_resolve_language_code(string $code): string
-//     {
-//         $c = strtolower(trim($code));
-//         if ($c === '') return '';
-//         $c = str_replace('_', '-', $c); // tolerate WP locales
-
-//         $supported = array_keys(reeid_get_supported_languages());
-
-//         // Legacy/alias heads
-//         $head_alias = [
-//             'no' => 'nb',
-//             'iw' => 'he',
-//             'in' => 'id',
-//         ];
-
-//         // Exact supported hit
-//         if (in_array($c, $supported, true)) {
-//             return $c;
-//         }
-
-//         // Apply alias if the whole input is a bare head
-//         if (isset($head_alias[$c])) {
-//             $c = $head_alias[$c];
-//             if (in_array($c, $supported, true)) return $c;
-//         }
-
-//         // Split head/region
-//         $head = $c;
-//         $region = '';
-//         if (strpos($c, '-') !== false) {
-//             $head   = substr($c, 0, strpos($c, '-'));
-//             $region = substr($c, strpos($c, '-') + 1);
-//         }
-//         // Alias the head if needed
-//         if (isset($head_alias[$head])) {
-//             $head = $head_alias[$head];
-//         }
-
-//         // Chinese collapse (single canonical)
-//         if ($head === 'zh' && in_array('zh', $supported, true)) {
-//             return 'zh';
-//         }
-
-//         // Portuguese split logic
-//         if ($head === 'pt') {
-//             // If region explicitly says BR/PT, map accordingly
-//             if ($region === 'br' && in_array('pt-br', $supported, true)) {
-//                 return 'pt-br';
-//             }
-//             if ($region === 'pt' && in_array('pt-pt', $supported, true)) {
-//                 return 'pt-pt';
-//             }
-//             // For any other pt-XX or bare pt, choose a default canonical:
-//             // default = European (pt-pt). Change to pt-br if you prefer.
-//             if (in_array('pt-pt', $supported, true)) {
-//                 return 'pt-pt';
-//             }
-//         }
-
-//         // Italian (regional canonical)
-//         if ($head === 'it' && in_array('it-it', $supported, true)) {
-//             return 'it-it';
-//         }
-
-//         // Burmese (regional canonical)
-//         if ($head === 'my' && in_array('my-mm', $supported, true)) {
-//             return 'my-mm';
-//         }
-
-//         // Generic “Burmese pattern” for other regionals that may be added later:
-//         // If there exists exactly one supported key with this head and a region, use it.
-//         $matches = array_values(array_filter($supported, static function ($k) use ($head) {
-//             return strpos($k, $head . '-') === 0;
-//         }));
-//         if (count($matches) === 1) {
-//             return $matches[0];
-//         }
-
-//         // If base head itself is a canonical, use it
-//         if (in_array($head, $supported, true)) {
-//             return $head;
-//         }
-
-//         // Fallback: return cleaned input
-//         return $c;
-//     }
-// }
-
 /**
- * Returns array of allowed languages (10 in free, all in premium).
- * NOTE: Use canonical codes here (pt-pt for free tier).
+ * Returns array of allowed languages (free vs premium).
+ * - Premium: all supported languages.
+ * - Free tier: restricted subset (by canonical code).
  */
 if (! function_exists('reeid_get_allowed_languages')) {
     function reeid_get_allowed_languages()
     {
         $all = reeid_get_supported_languages();
 
+        // Premium: everything is allowed.
         if (reeid_is_premium()) {
             return $all;
         }
 
-        // Free tier: 10 popular canonicals (adjust as needed)
-        $free = array('en', 'es', 'fr', 'de', 'zh', 'ja', 'ar', 'ru', 'th', 'it' /* or 'pt-pt' instead of 'it-it' if you want */);
+        // Free tier: 10 popular canonicals (adjust as needed).
+        // NOTE: use canonical codes from reeid_get_supported_languages().
+        $free = array(
+            'en',
+            'es',
+            'fr',
+            'de',
+            'zh',
+            'ja',
+            'ar',
+            'ru',
+            'th',
+            'it',
+        );
 
-        return array_intersect_key($all, array_flip($free));
+        $allowed = array_intersect_key($all, array_flip($free));
+
+        // Fallback: always allow at least English if misconfigured.
+        if (empty($allowed) && isset($all['en'])) {
+            $allowed = array('en' => $all['en']);
+        }
+
+        return $allowed;
     }
 }
 
@@ -1233,9 +1160,71 @@ if (! function_exists('reeid_can_use_custom_prompt')) {
 if (! function_exists('reeid_is_language_allowed')) {
     function reeid_is_language_allowed(string $code): bool
     {
-        $resolved = reeid_resolve_language_code($code);
+        // Assumes reeid_resolve_language_code() exists elsewhere in the plugin.
+        $resolved = function_exists('reeid_resolve_language_code')
+            ? reeid_resolve_language_code($code)
+            : $code;
+
         $allowed  = reeid_get_allowed_languages();
         return isset($allowed[$resolved]);
+    }
+}
+
+/**
+ * Enabled languages for this site as code => label.
+ * Intersection of:
+ *   - supported languages (canonical list)
+ *   - allowed by license (free vs premium)
+ *   - admin-enabled list in option "reeid_enabled_languages" (JSON)
+ */
+if (! function_exists('reeid_get_enabled_languages')) {
+    function reeid_get_enabled_languages()
+    {
+        $supported = reeid_get_supported_languages();
+        $allowed   = reeid_get_allowed_languages();
+
+        $raw   = get_option('reeid_enabled_languages', '');
+        $codes = array();
+
+        if (is_string($raw) && $raw !== '') {
+            $decoded = json_decode($raw, true);
+            if (is_array($decoded)) {
+                $codes = $decoded;
+            }
+        }
+
+        // Normalize codes
+        $codes = array_values(array_unique(array_map('strval', $codes)));
+
+        // Filter by supported & allowed
+        $out = array();
+        foreach ($codes as $code) {
+            if (isset($supported[$code]) && isset($allowed[$code])) {
+                $out[$code] = $supported[$code];
+            }
+        }
+
+        // Fallback: ensure at least source language is enabled if allowed.
+        if (empty($out)) {
+            $src = (string) get_option('reeid_translation_source_lang', 'en');
+            if (isset($supported[$src]) && isset($allowed[$src])) {
+                $out[$src] = $supported[$src];
+            } elseif (isset($supported['en']) && isset($allowed['en'])) {
+                $out['en'] = $supported['en'];
+            }
+        }
+
+        return $out;
+    }
+}
+
+/**
+ * Enabled language codes only (no labels).
+ */
+if (! function_exists('reeid_get_enabled_language_codes')) {
+    function reeid_get_enabled_language_codes()
+    {
+        return array_keys(reeid_get_enabled_languages());
     }
 }
 
