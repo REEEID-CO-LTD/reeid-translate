@@ -265,257 +265,232 @@ if (function_exists('register_activation_hook')) {
 }
 
 
-/* ===========================================================
- SECTION 0.2 : Small, safe WooCommerce "attributes panel" CSS + JS fix
- - Conservative: runs only on frontend single-product pages,
-   and only for products that actually have attributes.
- - Self-contained: IDs/classes are unique to avoid collisions.
- =========================================================== */
-
-if (! defined('REEID_WC_ATTRS_FIX_LOADED')) {
-    define('REEID_WC_ATTRS_FIX_LOADED', true);
-
-    // Print a minimal CSS override in <head> when appropriate
-    add_action('wp_head', function() {
-        if (is_admin()) return;
-        if (! function_exists('is_product') || ! is_product()) return;
-        global $post;
-        if (empty($post->ID)) return;
-        if (! function_exists('wc_get_product')) return;
-        $prod = wc_get_product($post->ID);
-        if (! $prod) return;
-        $attrs = $prod->get_attributes();
-        if (empty($attrs)) return; // nothing to fix
-
-        // Scoped CSS override (very specific to product pages)
-        $css = <<<CSS
-/* REEID: ensure WooCommerce "Additional information" panel and attributes table are not collapsed */
-.single-product .woocommerce-Tabs-panel--additional_information,
-.single-product #tab-additional_information {
-  display: block !important;
-  visibility: visible !important;
-  opacity: 1 !important;
-  height: auto !important;
-  max-height: none !important;
-  transform: none !important;
-  pointer-events: auto !important;
-}
-
-/* table rendering for attributes */
-.single-product #tab-additional_information table.shop_attributes,
-.single-product .woocommerce-Tabs-panel--additional_information .woocommerce-product-attributes,
-.single-product table.shop_attributes.woocommerce-product-attributes {
-  display: table !important;
-}
-#reeid-wc-attrs-forced-visible { }
-CSS;
-        echo "<style id='reeid-wc-attrs-fix' data-reeid='1'>\n" . $css . "\n</style>\n";
-    }, 9999); // late priority so it wins over earlier stylesheets
-
-
-    // Print a JS fallback in footer that removes inline collapses if panel size is zero
-    add_action('wp_footer', function() {
-        if (is_admin()) return;
-        if (! function_exists('is_product') || ! is_product()) return;
-        global $post;
-        if (empty($post->ID)) return;
-        if (! function_exists('wc_get_product')) return;
-        $prod = wc_get_product($post->ID);
-        if (! $prod) return;
-        $attrs = $prod->get_attributes();
-        if (empty($attrs)) return;
-
-        // Output JS (keeps minimal footprint, no console spam)
-        ?>
-<script id="reeid-wc-attrs-unique-v1">
-(function(){
-  try {
-    const PFX = '[REEID-ATTRS-UNIQUE]';
-
-    // selectors for attributes
-    const ATTR_SEL = 'table.shop_attributes, .woocommerce-product-attributes, table.woocommerce-product-attributes';
-
-    // small helpers (re-used from previous script)
-    function scopeChildren(parent, selector){
-      try { return Array.from(parent.querySelectorAll(':scope > ' + selector)); }
-      catch(e){ return Array.from(parent.children).filter(ch=>{ try { return ch.matches && ch.matches(selector); } catch(e){ return false; } }); }
+/*===========================================================================
+  SECTION 0.2 : WooCommerce attributes panel — single table, correct tab
+  - Self-contained: only runs on single product pages.
+  - Guarantees:
+      * Attributes table lives ONLY in "Additional information" panel.
+      * "Description" tab is the default active tab on initial load.
+      * No duplicate attributes tables in Description or elsewhere.
+===========================================================================*/
+add_action('wp_head', function () {
+    if (! function_exists('is_product') || ! is_product()) {
+        return;
     }
-    function findTabsWrapper(){
-      const candidates = ['.woocommerce-tabs', '.wc-tabs-wrapper', '.woocommerce-tabs-wrapper', '.woocommerce-tabs .wc-tabs-wrapper'];
-      for(const s of candidates){ const el=document.querySelector(s); if(el) return el; }
-      // fallback: find element that contains multiple panels
-      const panels = Array.from(document.querySelectorAll('.woocommerce-Tabs-panel, [id^="tab-"]'));
-      for(const p of panels){ if(!p.parentElement) continue; const siblings = Array.from(p.parentElement.querySelectorAll('.woocommerce-Tabs-panel, [id^="tab-"]')); if(siblings.length>1) return p.parentElement; }
-      return null;
-    }
-    function findPanelDirect(wrapper, idName){
-      if(!wrapper) return null;
-      let p = Array.from(scopeChildren(wrapper, '[id="' + idName + '"]'))[0];
-      if(p) return p;
-      p = Array.from(scopeChildren(wrapper, '.woocommerce-Tabs-panel--additional_information, .woocommerce-Tabs-panel')).
-            find(el => (el.className||'').toLowerCase().indexOf('additional_information') !== -1);
-      if(p) return p;
-      p = Array.from(scopeChildren(wrapper, '*')).find(ch => (ch.id||'').toLowerCase().indexOf('additional_information') !== -1);
-      return p || null;
-    }
-    function createPanelUnderWrapper(wrapper, panelId, labelledById){
-      const panel = document.createElement('div');
-      panel.id = panelId;
-      panel.className = 'woocommerce-Tabs-panel woocommerce-Tabs-panel--additional_information panel entry-content wc-tab';
-      panel.setAttribute('role','tabpanel');
-      if(labelledById) panel.setAttribute('aria-labelledby', labelledById);
-      // append near end; try after description panel else append
-      const desc = Array.from(scopeChildren(wrapper, '.woocommerce-Tabs-panel, [id^="tab-"]')).find(ch => (ch.className||'').toLowerCase().indexOf('description') !== -1 || ch.id === 'tab-description');
-      if(desc && desc.parentElement === wrapper && desc.nextSibling) wrapper.insertBefore(panel, desc.nextSibling);
-      else wrapper.appendChild(panel);
-      return panel;
-    }
-    function findTabHeader(wrapper){
-      const listSelectors=['ul.wc-tabs','ul.tabs','.wc-tabs-wrapper ul','.woocommerce-tabs ul'];
-      let list=null;
-      for(const s of listSelectors){ list = wrapper.querySelector ? wrapper.querySelector(s) : null; if(list) break; }
-      if(!list) list = document.querySelector('ul.wc-tabs, ul.tabs, .woocommerce-tabs ul');
-      return list;
-    }
-    function createTabHeaderIfMissing(wrapper, panelId, panelLabelText){
-      const tabList = findTabHeader(wrapper);
-      if(!tabList) return null;
-      const existing = tabList.querySelector('[aria-controls="' + panelId + '"], a[href="#' + panelId + '"], li#tab-title-' + panelId);
-      if(existing) return existing.closest('li') || existing;
-      const li = document.createElement('li');
-      li.id = 'tab-title-' + panelId;
-      li.className = 'additional_information_tab';
-      li.setAttribute('role','presentation');
-      const a = document.createElement('a');
-      a.setAttribute('href','#' + panelId);
-      a.setAttribute('role','tab');
-      a.setAttribute('aria-controls', panelId);
-      a.setAttribute('tabindex','0');
-      a.textContent = panelLabelText || 'Additional information';
-      li.appendChild(a);
-      // try place after description tab
-      const desc = tabList.querySelector('.description_tab, #tab-title-tab-description, li.tab-item--description, a[href="#tab-description"]');
-      if(desc && desc.parentElement === tabList && desc.nextSibling) tabList.insertBefore(li, desc.nextSibling);
-      else tabList.appendChild(li);
-      // basic click behavior to show/hide panels (keeps UX functional if theme JS not present)
-      a.addEventListener('click', function(ev){
-        ev.preventDefault();
-        Array.from(tabList.children).forEach(ch=>ch.classList && ch.classList.remove('active'));
-        li.classList.add('active');
-        const panels = wrapper.querySelectorAll('.woocommerce-Tabs-panel, [id^="tab-"]');
-        panels.forEach(p => {
-          if(p.id === panelId){ p.style.display = ''; p.classList && p.classList.add('active'); }
-          else { p.style.display = 'none'; p.classList && p.classList.remove('active'); }
-        });
-      }, {passive:false});
-      return li;
-    }
-
-    function chooseOrCreateCorrectPanel(){
-      const wrapper = findTabsWrapper();
-      if(!wrapper) return null;
-      const desiredId = 'tab-additional_information';
-      let correctPanel = findPanelDirect(wrapper, desiredId);
-      if(correctPanel && correctPanel.parentElement !== wrapper){
-        const alt = findPanelDirect(wrapper, desiredId);
-        if(alt && alt.parentElement === wrapper) correctPanel = alt;
-        else correctPanel = createPanelUnderWrapper(wrapper, desiredId, 'tab-title-' + desiredId);
-      } else if(!correctPanel){
-        correctPanel = createPanelUnderWrapper(wrapper, desiredId, 'tab-title-' + desiredId);
-      }
-      // ensure header exists
-      const tabList = findTabHeader(wrapper);
-      if(tabList){
-        let labelText = null;
-        const globalAnchor = document.querySelector('a[href="#' + desiredId + '"], [aria-controls="' + desiredId + '"]');
-        if(globalAnchor && globalAnchor.textContent && globalAnchor.textContent.trim()) labelText = globalAnchor.textContent.trim();
-        if(!labelText){
-          const altLi = document.querySelector('.additional_information_tab, li[id*="additional_information"], a[href*="additional_information"]');
-          if(altLi && altLi.textContent && altLi.textContent.trim()) labelText = altLi.textContent.trim();
+    ?>
+    <style id="reeid-wc-attrs-fix">
+        /* Make sure the Additional information panel is not hidden/collapsed by theme CSS */
+        .single-product .woocommerce-Tabs-panel--additional_information,
+        .single-product #tab-additional_information {
+            display: block;
         }
-        if(!labelText) labelText = 'Additional information';
-        createTabHeaderIfMissing(wrapper, correctPanel.id, labelText);
-      }
-      return correctPanel;
-    }
-
-    // Core: ensure single attributes table inside correct panel
-    function enforceSingleAttributes() {
-      try {
-        const panel = chooseOrCreateCorrectPanel();
-        if(!panel) { console.log(PFX, 'no tabs wrapper/panel found'); return false; }
-
-        const list = Array.from(document.querySelectorAll(ATTR_SEL));
-        if(list.length === 0) { console.log(PFX, 'no attributes table found'); return false; }
-
-        // If any table is already inside target panel, keep the first such as canonical
-        let canonical = list.find(t => panel.contains(t));
-        if(!canonical) {
-          // prefer the first table that is visible (non-zero size) or just use list[0]
-          canonical = list.find(t=> (t.offsetWidth>0 || t.offsetHeight>0)) || list[0];
-          // move canonical into panel
-          let container = panel.querySelector('#reeid-attrs-wrapper');
-          if(!container){ container = document.createElement('div'); container.id = 'reeid-attrs-wrapper'; container.style.padding='0'; container.style.margin='0'; panel.appendChild(container); }
-          container.appendChild(canonical);
-          console.log(PFX, 'moved canonical attributes table into', '#'+panel.id);
-        } else {
-          console.log(PFX, 'canonical attributes already inside', '#'+panel.id);
+        /* Ensure Woo attributes tables use standard layout */
+        .single-product #tab-additional_information table.shop_attributes,
+        .single-product .woocommerce-Tabs-panel--additional_information .woocommerce-product-attributes,
+        .single-product table.shop_attributes.woocommerce-product-attributes {
+            width: 100%;
+            border-collapse: collapse;
         }
+    </style>
+    <?php
+}, 20);
 
-        // Remove any other attributes tables (duplicates) anywhere except the canonical
-        Array.from(document.querySelectorAll(ATTR_SEL)).forEach(t => {
-          if(t === canonical) return;
-          // safe removal: mark for server-side debugging then remove
-          try { t.setAttribute('data-reeid-removed', '1'); } catch(e){}
-          if(t.parentElement) t.parentElement.removeChild(t);
-          console.log(PFX, 'removed duplicate attributes table (removed from DOM)');
-        });
-
-        // tidy: ensure panel visible if it's the active tab; otherwise keep as panel
-        try { panel.classList.add('reeid-attrs-present'); } catch(e){}
-        return true;
-      } catch(e) {
-        console.log(PFX, 'error during enforceSingleAttributes', e && e.message);
-        return false;
-      }
+add_action('wp_footer', function () {
+    if (! function_exists('is_product') || ! is_product() || is_admin()) {
+        return;
     }
+    ?>
+    <script id="reeid-wc-attrs-fix-js">
+    (function(){
+        try {
+            var PFX = '[REEID WC ATTRS]';
 
-    // attempt repeatedly briefly; if not successful, observe mutations
-    let tries = 0, maxTries = 12, interval = 250, timer = null, obs = null;
-    function attemptOnce() {
-      tries++;
-      const ok = enforceSingleAttributes();
-      if(ok) { if(timer) { clearInterval(timer); timer = null; } if(obs) { obs.disconnect(); obs = null; } return true; }
-      if(tries >= maxTries) {
-        if(timer) { clearInterval(timer); timer = null; }
-        // set up mutation observer to catch late renders/overwrites
-        obs = new MutationObserver(function(muts, o){
-          if(enforceSingleAttributes()) { o.disconnect(); obs = null; }
-        });
-        obs.observe(document.documentElement || document.body, { childList:true, subtree:true, attributes:true });
-      }
-      return false;
-    }
+            function log(){
+                if (window.console && console.log) {
+                    // console.log.apply(console, arguments);
+                }
+            }
 
-    function start() {
-      attemptOnce();
-      if(!timer) timer = setInterval(attemptOnce, interval);
-      setTimeout(function(){ if(timer){ clearInterval(timer); timer = null; } }, (maxTries + 3) * interval);
-    }
+            function findTabsWrapper() {
+                var selectors = [
+                    '.woocommerce-tabs',
+                    '.wc-tabs-wrapper',
+                    '.woocommerce-tabs-wrapper'
+                ];
+                for (var i = 0; i < selectors.length; i++) {
+                    var el = document.querySelector(selectors[i]);
+                    if (el) return el;
+                }
+                return null;
+            }
 
-    if(document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, {passive:true});
-    else start();
+            function findAttributesTables(scope) {
+                var root = scope || document;
+                return Array.prototype.slice.call(
+                    root.querySelectorAll(
+                        'table.shop_attributes, .woocommerce-product-attributes, table.woocommerce-product-attributes'
+                    )
+                );
+            }
 
-    // expose quick debug for console: window.reeidEnforceAttrsNow()
-    try { window.reeidEnforceAttrsNow = enforceSingleAttributes; } catch(e){}
-  } catch(e) {}
-})();
-</script>
+            function findDescriptionPanel(wrapper) {
+                if (!wrapper) return null;
+                var candidates = wrapper.querySelectorAll(
+                    '.woocommerce-Tabs-panel--description, #tab-description, .woocommerce-Tabs-panel[id="tab-description"]'
+                );
+                if (candidates.length) return candidates[0];
+                return null;
+            }
 
+            function findAdditionalInfoPanel(wrapper) {
+                if (!wrapper) return null;
+                var candidates = wrapper.querySelectorAll(
+                    '.woocommerce-Tabs-panel--additional_information, #tab-additional_information'
+                );
+                if (candidates.length) return candidates[0];
+                return null;
+            }
 
-        <?php
-    }, 9999);
-}
+            function ensureTabsOrder(wrapper) {
+                if (!wrapper) return;
+                var list = wrapper.querySelector('ul.wc-tabs, ul.tabs, .woocommerce-tabs ul');
+                if (!list) return;
+
+                var items = Array.prototype.slice.call(list.querySelectorAll('li'));
+                var descLi = null, addLi = null;
+                items.forEach(function(li){
+                    var a = li.querySelector('a[href^="#"]');
+                    if (!a) return;
+                    var href = a.getAttribute('href');
+                    if (!href) return;
+                    href = href.toLowerCase();
+                    if (href === '#tab-description' || href.indexOf('description') !== -1) {
+                        descLi = li;
+                    } else if (href === '#tab-additional_information' || href.indexOf('additional') !== -1) {
+                        addLi = li;
+                    }
+                });
+
+                if (descLi && list.firstElementChild !== descLi) {
+                    list.insertBefore(descLi, list.firstElementChild);
+                }
+                if (addLi && descLi && addLi.previousElementSibling !== descLi) {
+                    list.insertBefore(addLi, descLi.nextElementSibling);
+                }
+
+                // Make Description the active tab on initial load
+                items.forEach(function(li){
+                    li.classList.remove('active');
+                    var a = li.querySelector('a[href^="#"]');
+                    if (!a) return;
+                    var targetId = a.getAttribute('href');
+                    if (!targetId || targetId.charAt(0) !== '#') return;
+                    var panel = document.querySelector(targetId);
+                    if (panel) panel.classList.remove('active');
+                });
+
+                if (descLi) {
+                    descLi.classList.add('active');
+                    var a = descLi.querySelector('a[href^="#"]');
+                    if (a) {
+                        var targetId = a.getAttribute('href');
+                        if (targetId && targetId.charAt(0) === '#') {
+                            var panel = document.querySelector(targetId);
+                            if (panel) panel.classList.add('active');
+                        }
+                    }
+                }
+            }
+
+            function normalizeAttributesLocation() {
+                var wrapper = findTabsWrapper();
+                if (!wrapper) {
+                    log(PFX, 'no tabs wrapper');
+                    return;
+                }
+
+                var panels = Array.prototype.slice.call(
+                    wrapper.querySelectorAll('.woocommerce-Tabs-panel, [id^="tab-"]')
+                );
+
+                var descPanel = findDescriptionPanel(wrapper);
+                var addPanel  = findAdditionalInfoPanel(wrapper);
+
+                var tables = findAttributesTables(document);
+                if (!tables.length) {
+                    log(PFX, 'no attributes tables found');
+                    return;
+                }
+
+                // Choose canonical table (first one found in DOM)
+                var canonical = tables[0];
+
+                // Ensure we have an Additional information panel to host it
+                if (!addPanel && wrapper) {
+                    // If no panel, do NOT create new one (avoid layout break),
+                    // but still make sure Description does not keep a copy.
+                    addPanel = null;
+                }
+
+                // If canonical is inside Description panel, move it to Additional info if possible
+                if (descPanel && canonical && descPanel.contains(canonical) && addPanel) {
+                    addPanel.appendChild(canonical);
+                }
+
+                // Remove all other attribute tables except canonical
+                tables.forEach(function(tbl){
+                    if (tbl === canonical) return;
+                    if (addPanel && addPanel.contains(tbl)) return; // in case theme cloned into panel
+                    tbl.parentNode && tbl.parentNode.removeChild(tbl);
+                });
+
+                // Extra safety: no attributes table in Description panel, ever
+                if (descPanel) {
+                    findAttributesTables(descPanel).forEach(function(tbl){
+                        if (tbl.parentNode) {
+                            tbl.parentNode.removeChild(tbl);
+                        }
+                    });
+                }
+
+                ensureTabsOrder(wrapper);
+            }
+
+            // Initial run after load
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', normalizeAttributesLocation);
+            } else {
+                normalizeAttributesLocation();
+            }
+
+            // Observe DOM changes in case theme/plugins inject attributes late
+            var obsTarget = document.documentElement || document.body;
+            if (window.MutationObserver && obsTarget) {
+                var obs = new MutationObserver(function(mutations){
+                    var touched = false;
+                    for (var i = 0; i < mutations.length; i++) {
+                        var m = mutations[i];
+                        if (m.addedNodes && m.addedNodes.length) {
+                            touched = true;
+                            break;
+                        }
+                    }
+                    if (touched) {
+                        normalizeAttributesLocation();
+                    }
+                });
+                obs.observe(obsTarget, { childList:true, subtree:true });
+            }
+        } catch(e) {
+            // Silent fail – never break the product page
+            if (window.console && console.error) {
+                console.error('[REEID WC ATTRS] error', e);
+            }
+        }
+    })();
+    </script>
+    <?php
+}, 99);
 
 /* =======================================================
    SECTION: LOCALIZE & ENQUEUE — REEID_TRANSLATE global object
