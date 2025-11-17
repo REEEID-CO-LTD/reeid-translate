@@ -16070,3 +16070,52 @@ if (!function_exists('reeid_elementor_collect_text_map_via_api_then_local')) {
     return $map;
 }
 }
+
+
+/* TEMP DEBUG: mark pages where REEID plugin body_class is active */
+if ( ! function_exists( 'reeid_debug_body_class_flag' ) ) {
+    function reeid_debug_body_class_flag( array $classes, array $class ): array {
+        // Just add a debug marker class everywhere
+        if ( ! in_array( 'reeid-debug-body', $classes, true ) ) {
+            $classes[] = 'reeid-debug-body';
+        }
+        return $classes;
+    }
+    add_filter( 'body_class', 'reeid_debug_body_class_flag', 5, 2 );
+}
+
+
+/* FIX: Force translated Elementor test page (FR) to behave as a page, not a blog single */
+if ( ! function_exists( 'reeid_fix_body_class_elementor_test_fr' ) ) {
+    function reeid_fix_body_class_elementor_test_fr( array $classes, array $class ): array {
+        global $post;
+
+        // Only act when we have a post and it's the FR Elementor test translation
+        if ( ! $post || (int) $post->ID !== 21327 ) {
+            return $classes;
+        }
+
+        // Remove blog/single-related classes that distort layout
+        $remove = [
+            'single',
+            'single-page',
+            'ast-blog-single-style-1',
+            'ast-custom-post-type',
+            'ast-single-post',
+        ];
+        $classes = array_values( array_diff( $classes, $remove ) );
+
+        // Ensure it's clearly marked as a page
+        if ( ! in_array( 'page', $classes, true ) ) {
+            $classes[] = 'page';
+        }
+
+        $page_id_class = 'page-id-' . $post->ID;
+        if ( ! in_array( $page_id_class, $classes, true ) ) {
+            $classes[] = $page_id_class;
+        }
+
+        return $classes;
+    }
+    add_filter( 'body_class', 'reeid_fix_body_class_elementor_test_fr', 50, 2 );
+}
