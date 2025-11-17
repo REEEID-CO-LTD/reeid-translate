@@ -213,20 +213,39 @@ function reeid_hreflang_resolve_product_id(&$langs_out, &$default_out) {
  *  --------------------------------------------------------------------- */
 function reeid_hreflang_render($post_id = null, $langs = null, $default = null) {
     if ($post_id === null) {
-        $langs_var = null; $default_var = null;
-        $post_id = reeid_hreflang_resolve_product_id($langs_var, $default_var);
-        if (!$post_id) return '';
-        if ($langs === null || $default === null) { $langs = $langs_var; $default = $default_var; }
+        $langs_var   = null;
+        $default_var = null;
+        $post_id     = reeid_hreflang_resolve_product_id($langs_var, $default_var);
+        if (! $post_id) {
+            return '';
+        }
+        if ($langs === null || $default === null) {
+            $langs   = $langs_var;
+            $default = $default_var;
+        }
     }
-    if ($langs === null || $default === null) reeid_hreflang_get_langs_defaults($langs, $default);
+
+    if ($langs === null || $default === null) {
+        reeid_hreflang_get_langs_defaults($langs, $default);
+    }
 
     $home      = rtrim(home_url('/'), '/');
     $base_slug = get_post_field('post_name', $post_id);
     $lines     = array();
 
     foreach ($langs as $lang) {
+        // For non-default languages, only include if translation meta exists.
+        if ($lang !== $default) {
+            $meta = get_post_meta($post_id, '_reeid_wc_tr_' . $lang, true);
+            if (empty($meta) || ! is_array($meta)) {
+                continue;
+            }
+        }
+
         $slug_for_lang = reeid_meta_slug_for_lang($post_id, $lang);
-        if ($slug_for_lang === '') $slug_for_lang = $base_slug;
+        if ($slug_for_lang === '') {
+            $slug_for_lang = $base_slug;
+        }
 
         $seg = reeid_norm_seg($slug_for_lang);
         $url = ($lang === $default)
@@ -236,49 +255,94 @@ function reeid_hreflang_render($post_id = null, $langs = null, $default = null) 
         $lines[$lang] = $url;
     }
 
+    if (empty($lines)) {
+        return '';
+    }
+
     $xdefault = isset($lines[$default]) ? $lines[$default] : reset($lines);
 
     $out = "<!-- REEID-WC-HREFLANG-FIX -->\n";
     foreach ($lines as $code => $u) {
-        $out .= sprintf('<link rel="alternate" hreflang="%s" href="%s" />' . "\n", esc_attr($code), esc_url($u));
+        $out .= sprintf(
+            '<link rel="alternate" hreflang="%s" href="%s" />' . "\n",
+            esc_attr($code),
+            esc_url($u)
+        );
     }
-    $out .= sprintf('<link rel="alternate" hreflang="x-default" href="%s" />' . "\n", esc_url($xdefault));
+    $out .= sprintf(
+        '<link rel="alternate" hreflang="x-default" href="%s" />' . "\n",
+        esc_url($xdefault)
+    );
+
     return $out;
 }
 
 function reeid_hreflang_render_normalized($post_id = null, $langs = null, $default = null) {
     if ($post_id === null) {
-        $langs_var = null; $default_var = null;
-        $post_id = reeid_hreflang_resolve_product_id($langs_var, $default_var);
-        if (!$post_id) return '';
-        if ($langs === null || $default === null) { $langs = $langs_var; $default = $default_var; }
+        $langs_var   = null;
+        $default_var = null;
+        $post_id     = reeid_hreflang_resolve_product_id($langs_var, $default_var);
+        if (! $post_id) {
+            return '';
+        }
+        if ($langs === null || $default === null) {
+            $langs   = $langs_var;
+            $default = $default_var;
+        }
     }
-    if ($langs === null || $default === null) reeid_hreflang_get_langs_defaults($langs, $default);
+
+    if ($langs === null || $default === null) {
+        reeid_hreflang_get_langs_defaults($langs, $default);
+    }
 
     $home      = rtrim(home_url('/'), '/');
     $base_slug = get_post_field('post_name', $post_id);
     $lines     = array();
 
     foreach ($langs as $lang) {
+        // For non-default languages, only include if translation meta exists.
+        if ($lang !== $default) {
+            $meta = get_post_meta($post_id, '_reeid_wc_tr_' . $lang, true);
+            if (empty($meta) || ! is_array($meta)) {
+                continue;
+            }
+        }
+
         $slug_for_lang = reeid_meta_slug_for_lang($post_id, $lang);
-        if ($slug_for_lang === '') $slug_for_lang = $base_slug;
+        if ($slug_for_lang === '') {
+            $slug_for_lang = $base_slug;
+        }
 
         $url = ($lang === $default)
-            ? $home . '/product/' . trim((string)$slug_for_lang, '/') . '/'
-            : $home . '/' . $lang . '/product/' . trim((string)$slug_for_lang, '/') . '/';
+            ? $home . '/product/' . trim((string) $slug_for_lang, '/') . '/'
+            : $home . '/' . $lang . '/product/' . trim((string) $slug_for_lang, '/') . '/';
 
+        // Normalize only last segment (keeps language prefix + product base)
         $lines[$lang] = reeid_normalize_last_segment($url);
+    }
+
+    if (empty($lines)) {
+        return '';
     }
 
     $xdefault = isset($lines[$default]) ? $lines[$default] : reset($lines);
 
     $out = "<!-- REEID-WC-HREFLANG-FIX -->\n";
     foreach ($lines as $code => $u) {
-        $out .= sprintf('<link rel="alternate" hreflang="%s" href="%s" />' . "\n", esc_attr($code), esc_url($u));
+        $out .= sprintf(
+            '<link rel="alternate" hreflang="%s" href="%s" />' . "\n",
+            esc_attr($code),
+            esc_url($u)
+        );
     }
-    $out .= sprintf('<link rel="alternate" hreflang="x-default" href="%s" />' . "\n", esc_url($xdefault));
+    $out .= sprintf(
+        '<link rel="alternate" hreflang="x-default" href="%s" />' . "\n",
+        esc_url($xdefault)
+    );
+
     return $out;
 }
+
 
 /** ------------------------------------------------------------------------
  *  Printer (plain) — no “mode” gate (prevents silent no-op)
