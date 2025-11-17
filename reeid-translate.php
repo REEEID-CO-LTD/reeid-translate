@@ -8729,11 +8729,23 @@ wp_enqueue_script( 'reeid-elementor-wires' );
 
     // 2) Decode percent-encoded slugs
     add_filter('request', function ($vars) {
-        if (! empty($vars['reeid_lang_code']) && ! empty($vars['name'])) {
-            $vars['name'] = rawurldecode($vars['name']);
+    if (! empty($vars['reeid_lang_code']) && ! empty($vars['name'])) {
+        $decoded = rawurldecode($vars['name']);
+        $vars['name'] = $decoded;
+
+        // If this slug corresponds to a PAGE, force WordPress to treat it as a page,
+        // not a blog/single. This keeps Astra in "page builder" layout instead of blog layout.
+        if (function_exists('get_page_by_path')) {
+            $page = get_page_by_path($decoded);
+            if ($page && $page->post_type === 'page') {
+                $vars['pagename'] = $decoded;
+                unset($vars['name']); // avoid single/blog resolution
+            }
         }
-        return $vars;
-    }, 10, 1);
+    }
+    return $vars;
+}, 10, 1);
+
 
     // 2a) Allow Unicode slug in the “name” query var
     add_filter('sanitize_title_for_query', function ($title, $raw_title, $context) {
