@@ -14776,192 +14776,96 @@ if ( ! function_exists('reeid_resolve_lang_from_request') ) {
 }
 
 /**
- * Hard-set Woo tabs so we always have:
- *  - #tab-description               (translated long description)
- *  - #tab-additional_information    (live attributes table)
+ * WooCommerce product tabs:
+ *  - Description tab: ONLY long description (already translation-aware via existing filters).
+ *  - Additional information tab: ONLY attributes table.
  *
- * We replace the callbacks on the default tabs instead of injecting HTML into content.
+ * We take full control of the callbacks so attributes do not leak into Description.
  */
-if (! function_exists('reeid_strip_attrs_from_content')) {
-    /**
-     * Strip WooCommerce attributes markup from HTML so the Description tab
-     * never shows the attributes table.
-     *
-     * Scope: used only for single-product Description panel.
-     */
-    function reeid_strip_attrs_from_content($html)
+if (! function_exists('reeid_wc_tab_description')) {
+    function reeid_wc_tab_description()
     {
-        if (! is_string($html) || $html === '') {
-            return $html;
+        global $product;
+
+        if (! $product instanceof \WC_Product) {
+            // Fallback to default behaviour if something is odd
+            the_content();
+            return;
         }
 
-        // 1) Remove our own debug wrapper if present
-        $html = preg_replace(
-            '#<div[^>]+id=(["\'])reeid-debug-attrs-wrapper\1[^>]*>[\s\S]*?</div>#i',
-            '',
-            $html
-        );
+        // Use WC API so existing REEID filters on product description still apply:
+        // - reeid_wc inline packets
+        // - Elementor / Gutenberg swap, etc.
+        $content = $product->get_description();
 
-        // 2) Remove any attributes TABLE by Woo classes
-        //    - <table class="woocommerce-product-attributes ...">
-        //    - <table class="shop_attributes ...">
-        $html = preg_replace(
+        /**
+         * Last-resort cleanup: if some theme / plugin injected attributes markup
+         * directly into the description HTML, strip typical attribute tables.
+         * This is defensive and should normally be a no-op.
+         */
+        $content = preg_replace(
             '#<table[^>]*\bclass=["\'][^"\']*(?:woocommerce-product-attributes|shop_attributes)[^"\']*["\'][^>]*>[\s\S]*?</table>#i',
             '',
-            $html
+            (string) $content
         );
 
-        // 3) Extra safety: remove generic containers that might wrap attributes
-        //    (some themes wrap them in div/section/dl with same classes)
-        $html = preg_replace(
-            '#<(div|section|dl)[^>]*\bclass=["\'][^"\']*(?:woocommerce-product-attributes|shop_attributes)[^"\']*["\'][^>]*>[\s\S]*?</\1>#i',
-            '',
-            $html
-        );
-
-        return $html;
+        echo wp_kses_post($content);
     }
 }
 
+if (! function_exists('reeid_wc_tab_additional_information')) {
+    function reeid_wc_tab_additional_information()
+    {
+        global $product;
+
+        if (! $product instanceof \WC_Product) {
+            // Use Woo default template if we for some reason lost the WC_Product
+            wc_get_template('single-product/tabs/additional-information.php');
+            return;
+        }
+
+        // This is the ONLY place where attributes table is rendered.
+        wc_display_product_attributes($product);
+    }
+}
+
+/**
+ * Normalize WooCommerce product tabs:
+ *  - Ensure Description & Additional information tabs exist.
+ *  - Force our callbacks so attributes live only in Additional information.
+ */
 add_filter('woocommerce_product_tabs', function ($tabs) {
-    if (is_admin() || (function_exists('wp_doing_ajax') && wp_doing_ajax()) || (function_exists('wp_is_json_request') && wp_is_json_request())) {
+    global $product;
+
+    if (! $product instanceof \WC_Product) {
         return $tabs;
     }
 
-    // Ensure the two keys exist so Woo will create panels with the exact IDs.
-    // Woo uses the array keys for IDs: "description" => #tab-description, etc.
-    $tabs['description'] = $tabs['description'] ?? [
-        'title'    => __('Description', 'woocommerce'),
-        'priority' => 10,
-        'callback' => '__return_null', // will be replaced below
-    ];
-    $tabs['additional_information'] = $tabs['additional_information'] ?? [
-        'title'    => __('Additional information', 'woocommerce'),
-        'priority' => 50,
-        'callback' => '__return_null', // will be replaced below
-    ];
+    // Ensure Description tab exists
+    if (empty($tabs['description'])) {
+        $tabs['description'] = [
+            'title'    => __('Description', 'woocommerce'),
+            'priority' => 10,
+            'callback' => 'reeid_wc_tab_description',
+        ];
+    } else {
+        $tabs['description']['callback'] = 'reeid_wc_tab_description';
+    }
 
-    // Source/default language
-    $default = function_exists('reeid_s269_default_lang')
-        ? strtolower((string) reeid_s269_default_lang())
-        : strtolower((string) get_option('reeid_translation_source_lang', 'en'));
-
-    // Resolve current language
-    $lang = function_exists('reeid_resolve_lang_from_request') ? reeid_resolve_lang_from_request() : '';
-    $lang = strtolower((string) $lang);
-
-    /**
-     * DESCRIPTION tab callback: print translated long description.
-     *
-     * IMPORTANT: we intentionally avoid apply_filters('the_content', ...)
-     * because that re-runs plugin the_content closures which may move/duplicate
-     * the attributes table into the description panel. Instead we:
-     *  - pull the translated content packet (if present),
-     *  - strip any attributes table / debug wrapper from that content,
-     *  - then run a conservative set of core formatters (do_blocks, wptexturize, wpautop, shortcodes, etc).
-     */
-    $tabs['description']['callback'] = function () use ($default, $lang) {
-        global $post;
-        if (!$post || $post->post_type !== 'product') {
-            return;
-        }
-
-        $content = (string) $post->post_content;
-
-        // If non-source language, try REEID packet
-        if ($lang !== '' && $lang !== $default) {
-            $packet = get_post_meta((int) $post->ID, "_reeid_wc_tr_{$lang}", true);
-            if (is_array($packet) && !empty($packet['content'])) {
-                $content = (string) $packet['content'];
-            }
-        }
-
-        // Remove any attributes HTML that may be present to avoid leakage/duplicates:
-        // - debug wrapper DIV (reeid-debug-attrs-wrapper)
-        // - any <table class="...shop_attributes..." or "woocommerce-product-attributes"
-        $content = preg_replace('#<div[^>]+id=(["\'])reeid-debug-attrs-wrapper\1[^>]*>[\s\S]*?</div>#i', '', $content);
-        $content = preg_replace('#<table[^>]*\b(class=["\'][^"\']*(?:woocommerce-product-attributes|shop_attributes)[^"\']*["\'])[^>]*>[\s\S]*?</table>#i', '', $content);
-
-        // Now safely format the content using core formatters (avoid apply_filters('the_content')).
-        if (function_exists('do_blocks')) {
-            $content = do_blocks($content);
-        }
-
-        if (function_exists('wptexturize')) {
-            $content = wptexturize($content);
-        }
-
-        if (function_exists('wpautop')) {
-            $content = wpautop($content);
-        }
-
-        if (function_exists('shortcode_unautop')) {
-            $content = shortcode_unautop($content);
-        }
-
-        if (function_exists('do_shortcode')) {
-            $content = do_shortcode($content);
-        }
-
-        if (function_exists('prepend_attachment')) {
-            $content = prepend_attachment($content);
-        }
-
-        if (function_exists('wp_replace_insecure_home_url')) {
-            $content = wp_replace_insecure_home_url($content);
-        }
-
-        // Final echo: this is the description panel content.
-        // REEID: ensure attributes table never leaks into Description
-        if (function_exists("reeid_strip_attrs_from_content")) {
-            $content = reeid_strip_attrs_from_content($content);
-        } else {
-            // Fallback: remove Woo attributes table by class name
-            $content = preg_replace('#<table[^>]*class=("|\'\')woocommerce-product-attributes\1[\s\S]*?</table>#i', '', $content);
-        }
-
-        echo $content;
-    };
-
-    /**
-     * ADDITIONAL INFORMATION tab: only if product actually has attributes.
-     * We rely on wc_display_product_attributes() to output the live attributes table.
-     */
-    $tabs['additional_information']['callback'] = function () {
-        global $post;
-        if (!$post || $post->post_type !== 'product') {
-            return;
-        }
-
-        if (!function_exists('wc_get_product')) {
-            return;
-        }
-
-        $product = wc_get_product((int) $post->ID);
-        if (!$product) {
-            return;
-        }
-
-        // If no attributes, Woo normally removes the tab; we mimic that.
-        if (method_exists($product, 'has_attributes') && ! $product->has_attributes()) {
-            return;
-        }
-
-        if (function_exists('wc_display_product_attributes')) {
-            wc_display_product_attributes($product);
-        }
-    };
-
-    // If no attributes, drop the tab entirely so themes don’t render an empty panel.
-    if (function_exists('wc_get_product')) {
-        $product = wc_get_product((int) get_the_ID());
-        if ($product && method_exists($product, 'has_attributes') && ! $product->has_attributes()) {
-            unset($tabs['additional_information']);
-        }
+    // Ensure Additional information tab exists
+    if (empty($tabs['additional_information'])) {
+        $tabs['additional_information'] = [
+            'title'    => __('Additional information', 'woocommerce'),
+            'priority' => 20,
+            'callback' => 'reeid_wc_tab_additional_information',
+        ];
+    } else {
+        $tabs['additional_information']['callback'] = 'reeid_wc_tab_additional_information';
     }
 
     return $tabs;
-}, 20);
+}, 50);
+
 
 
 // PROBE: prove we’re wrapping final HTML on product pages.
