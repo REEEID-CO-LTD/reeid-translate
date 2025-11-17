@@ -14508,6 +14508,75 @@ add_filter('the_content', function ($content) {
     return $content;
 }, 5);
 
+/**
+ * FINAL GUARD:
+ * Strip WooCommerce attributes table from the main product content,
+ * so it does not appear in the Description tab.
+ *
+ * Additional information tab still renders attributes via wc_display_product_attributes(),
+ * which does NOT go through this filter.
+ */
+if (! function_exists('reeid_strip_wc_attrs_from_description_tab')) {
+    function reeid_strip_wc_attrs_from_description_tab($content)
+    {
+        // Only touch the main product content on single product pages
+        if (! function_exists('is_product') || ! is_product()) {
+            return $content;
+        }
+        if (! in_the_loop() || ! is_main_query()) {
+            return $content;
+        }
+
+        // Remove standard Woo attributes table
+        $content = preg_replace(
+            '#<table[^>]*\bclass=["\'][^"\']*(woocommerce-product-attributes|shop_attributes)[^"\']*["\'][^>]*>[\s\S]*?</table>#i',
+            '',
+            (string) $content
+        );
+
+        // Remove any wrappers some themes use around that table
+        $content = preg_replace(
+            '#<(div|section)[^>]*\bclass=["\'][^"\']*(woocommerce-product-attributes|shop_attributes)[^"\']*["\'][^>]*>[\s\S]*?</\1>#i',
+            '',
+            (string) $content
+        );
+
+        return $content;
+    }
+
+    // Priority 999 to run AFTER any theme/plugin that appends the attributes table
+    add_filter('the_content', 'reeid_strip_wc_attrs_from_description_tab', 999);
+}
+
+/**
+ * Ensure WooCommerce product tabs open on Description by default.
+ * We do NOT change callbacks, only priorities / order.
+ */
+if (! function_exists('reeid_wc_force_description_first_tab')) {
+    function reeid_wc_force_description_first_tab($tabs)
+    {
+        if (! is_array($tabs)) {
+            return $tabs;
+        }
+
+        // Force Description first
+        if (isset($tabs['description'])) {
+            $tabs['description']['priority'] = 5;
+        }
+
+        // Force Additional information after Description
+        if (isset($tabs['additional_information'])) {
+            // Make sure it comes after description
+            $tabs['additional_information']['priority'] = 15;
+        }
+
+        // WooCommerce will sort by priority in its template
+        return $tabs;
+    }
+
+    // Run late so we override theme / other plugins ordering
+    add_filter('woocommerce_product_tabs', 'reeid_wc_force_description_first_tab', 99);
+}
 
 
 /**
