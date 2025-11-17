@@ -8831,7 +8831,7 @@ wp_enqueue_script( 'reeid-elementor-wires' );
 
 /*===========================================================================
   BODY CLASS FIX FOR TRANSLATED PAGES (ASTRA ONLY)
-  Ensure Elementor translations that are pages are styled as "pages", not "blog singles".
+  Ensure translated pages are styled as "pages", not "blog singles".
  ===========================================================================*/
 if ( ! function_exists( 'reeid_adjust_body_class_for_lang_pages' ) ) {
     function reeid_adjust_body_class_for_lang_pages( array $classes, array $class ): array {
@@ -8841,13 +8841,6 @@ if ( ! function_exists( 'reeid_adjust_body_class_for_lang_pages' ) ) {
             if ( ! $theme || $theme->get_template() !== 'astra' ) {
                 return $classes;
             }
-        }
-
-        $lang_code = get_query_var( 'reeid_lang_code' );
-
-        // Only touch language-prefixed requests
-        if ( empty( $lang_code ) ) {
-            return $classes;
         }
 
         global $post;
@@ -8892,6 +8885,7 @@ if ( ! function_exists( 'reeid_adjust_body_class_for_lang_pages' ) ) {
 
     add_filter( 'body_class', 'reeid_adjust_body_class_for_lang_pages', 40, 2 );
 }
+
 
  /*==============================================================================
   SECTION 27 : WooCommerce — Language-Prefixed Product Permalinks
@@ -16071,51 +16065,3 @@ if (!function_exists('reeid_elementor_collect_text_map_via_api_then_local')) {
 }
 }
 
-
-/* TEMP DEBUG: mark pages where REEID plugin body_class is active */
-if ( ! function_exists( 'reeid_debug_body_class_flag' ) ) {
-    function reeid_debug_body_class_flag( array $classes, array $class ): array {
-        // Just add a debug marker class everywhere
-        if ( ! in_array( 'reeid-debug-body', $classes, true ) ) {
-            $classes[] = 'reeid-debug-body';
-        }
-        return $classes;
-    }
-    add_filter( 'body_class', 'reeid_debug_body_class_flag', 5, 2 );
-}
-
-
-/* FIX: Force translated Elementor test page (FR) to behave as a page, not a blog single */
-if ( ! function_exists( 'reeid_fix_body_class_elementor_test_fr' ) ) {
-    function reeid_fix_body_class_elementor_test_fr( array $classes, array $class ): array {
-        global $post;
-
-        // Only act when we have a post and it's the FR Elementor test translation
-        if ( ! $post || (int) $post->ID !== 21327 ) {
-            return $classes;
-        }
-
-        // Remove blog/single-related classes that distort layout
-        $remove = [
-            'single',
-            'single-page',
-            'ast-blog-single-style-1',
-            'ast-custom-post-type',
-            'ast-single-post',
-        ];
-        $classes = array_values( array_diff( $classes, $remove ) );
-
-        // Ensure it's clearly marked as a page
-        if ( ! in_array( 'page', $classes, true ) ) {
-            $classes[] = 'page';
-        }
-
-        $page_id_class = 'page-id-' . $post->ID;
-        if ( ! in_array( $page_id_class, $classes, true ) ) {
-            $classes[] = $page_id_class;
-        }
-
-        return $classes;
-    }
-    add_filter( 'body_class', 'reeid_fix_body_class_elementor_test_fr', 50, 2 );
-}
