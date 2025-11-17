@@ -15977,6 +15977,21 @@ if (!function_exists('reeid_elementor_collect_text_map_via_api_then_local')) {
             }
         }
 
-        return $map;
+// Never translate structural CSS/layout controls, they break Elementor layouts if changed
+    $forbidden_suffixes = [
+        '/settings/flex_direction',
+    ];
+
+    foreach ($map as $path => $value) {
+        foreach ($forbidden_suffixes as $suffix) {
+            $len = strlen($suffix);
+            if ($len > 0 && substr($path, -$len) === $suffix) {
+                unset($map[$path]);
+                break;
+            }
+        }
     }
+
+    return $map;
+}
 }
