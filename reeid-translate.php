@@ -633,7 +633,7 @@ add_action('plugins_loaded', function () {
 }, 1);
 
 
-
+//===========================================================================
 
 /** Toggle debug logs explicitly (kept OFF for .org compliance). */
 if (!defined('REEID_DEBUG')) {
@@ -707,6 +707,134 @@ if (!function_exists('reeid_log_main_query_flags')) {
 
     add_action('template_redirect', 'reeid_log_main_query_flags', 9);
 }
+
+
+
+
+/*===========================================================================
+  TEMP: MAIN QUERY FLAG LOGGER FOR ELEMENTOR LAYOUT DEBUG
+  - Logs how WP sees EN/FR Elementor test pages (15148, 21345)
+  - Only runs when REEID_DEBUG is true
+===========================================================================*/
+if (!function_exists('reeid_log_main_query_flags')) {
+    function reeid_log_main_query_flags()
+    {
+        if (!defined('REEID_DEBUG') || !REEID_DEBUG) {
+            return;
+        }
+
+        global $wp_query;
+
+        $qid = get_queried_object_id();
+        if (!$qid) {
+            return;
+        }
+
+        // Restrict to our test pages only
+        $watched_ids = [15148, 21345];
+        if (!in_array((int) $qid, $watched_ids, true)) {
+            return;
+        }
+
+        $post_type = get_post_type($qid);
+        $lang_meta = get_post_meta($qid, '_reeid_translation_lang', true);
+        $lang_qv   = get_query_var('reeid_lang_code');
+
+        $flags = [
+            'request_uri'       => isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '',
+            'queried_id'        => $qid,
+            'post_type'         => $post_type,
+            'lang_meta'         => $lang_meta,
+            'lang_query_var'    => $lang_qv,
+            'is_page'           => is_page(),
+            'is_single'         => is_single(),
+            'is_singular'       => is_singular(),
+            'is_singular_page'  => is_singular('page'),
+            'is_singular_post'  => is_singular('post'),
+            'is_front_page'     => is_front_page(),
+            'query_vars'        => is_object($wp_query) ? $wp_query->query_vars : null,
+        ];
+
+        if (function_exists('reeid_debug_log')) {
+            reeid_debug_log('main_query_flags', $flags);
+        }
+    }
+
+    add_action('template_redirect', 'reeid_log_main_query_flags', 9);
+}
+
+
+/*===========================================================================
+  ROUTING FIX: FORCE PAGE MODE FOR PAGE SLUGS (LANG-PREFIX SAFE)
+  - If main query uses `name` + post_type=any, but a page exists with that slug,
+    rewrite the query as a page query (pagename + post_type=page).
+  - This prevents Astra from treating translated pages like blog posts.
+===========================================================================*/
+if (!function_exists('reeid_fix_page_queries_for_translated_slugs')) {
+    function reeid_fix_page_queries_for_translated_slugs($query)
+    {
+        // Frontend main query only
+        if (is_admin() || ! $query->is_main_query()) {
+            return;
+        }
+
+        $name      = $query->get('name');
+        $post_type = $query->get('post_type');
+
+        // Only adjust when:
+        // - we have a "name" slug,
+        // - and WP isn't already locked to a specific type (or is explicitly "any")
+        if (empty($name)) {
+            return;
+        }
+
+        if (!empty($post_type) && $post_type !== 'any') {
+            return;
+        }
+
+        // Look up a page with this path/slug
+        $page = get_page_by_path($name, OBJECT, 'page');
+        if (! $page instanceof WP_Post) {
+            return;
+        }
+
+        // We found a page: treat this as a proper "page" query
+        $query->set('post_type', 'page');
+        $query->set('pagename', $name);
+
+        // Optional: unset name to avoid confusing conditional logic
+        // (not strictly required, but safe)
+        $query->set('name', '');
+
+        if (defined('REEID_DEBUG') && REEID_DEBUG && function_exists('reeid_debug_log')) {
+            reeid_debug_log('routing_fix_applied', [
+                'request_uri' => isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '',
+                'name'        => $name,
+                'page_id'     => (int) $page->ID,
+            ]);
+        }
+    }
+
+    add_action('pre_get_posts', 'reeid_fix_page_queries_for_translated_slugs', 11);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//======================================================
 
 
 /** Verify a nonce coming from GET safely. */
@@ -8780,13 +8908,30 @@ wp_enqueue_script( 'reeid-elementor-wires' );
         return $vars;
     }, 10, 1);
 
-    // 2) Decode percent-encoded slugs
+        // 2) Decode percent-encoded slugs 
     add_filter('request', function ($vars) {
         if (! empty($vars['reeid_lang_code']) && ! empty($vars['name'])) {
+            // Always decode name for native-script slugs
             $vars['name'] = rawurldecode($vars['name']);
+
+            // If WP has not locked post_type yet (or set it to "any"),
+            // and a PAGE exists with this slug, treat it as a page query.
+            $post_type = isset($vars['post_type']) ? $vars['post_type'] : '';
+
+            if ($post_type === '' || $post_type === 'any') {
+                $page = get_page_by_path($vars['name'], OBJECT, 'page');
+                if ($page instanceof WP_Post) {
+                    // Switch query to page mode
+                    $vars['pagename']  = $vars['name'];
+                    $vars['post_type'] = 'page';
+                    unset($vars['name']);
+                }
+            }
         }
+
         return $vars;
     }, 10, 1);
+
 
     // 2a) Allow Unicode slug in the “name” query var
     add_filter('sanitize_title_for_query', function ($title, $raw_title, $context) {
