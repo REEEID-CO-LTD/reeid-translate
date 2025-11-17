@@ -8975,13 +8975,19 @@ wp_enqueue_script( 'reeid-elementor-wires' );
             return preg_replace('/[^a-z0-9\-_]/i', '', $l);
         }, $langs)));
 
-        //------------------------------------------------------------------
+                //------------------------------------------------------------------
         // Build rewrite rules:  /{lang}/{slug}/  → sets query var + slug
         //------------------------------------------------------------------
         $new = [];
         foreach ($langs as $lang) {
+            // Match: /fr/some-slug/  → $matches[1] = "some-slug"
             $pattern = "^{$lang}/([^/]+)/?$";
-            $query   = "index.php?name=\$matches[1]&reeid_lang_code={$lang}";
+
+            // IMPORTANT:
+            // - Set BOTH pagename and name so pages resolve in "page mode"
+            // - Keep reeid_lang_code so the rest of the plugin knows the lang
+            $query   = "index.php?pagename=\$matches[1]&name=\$matches[1]&reeid_lang_code={$lang}";
+
             $new[$pattern] = $query;
         }
 
@@ -8989,7 +8995,9 @@ wp_enqueue_script( 'reeid-elementor-wires' );
         return $new + $rules;
     }, 10, 1);
 
-    // 4) Prefix all translated permalinks with /{lang}/{decoded-slug}/
+    //------------------------------------------------------------------
+    // Prefix all translated permalinks with /{lang}/{decoded-slug}/
+    //------------------------------------------------------------------
     add_filter('post_link', 'reeid_prefix_permalink', 10, 2);
     add_filter('page_link', 'reeid_prefix_permalink', 10, 2);
 
