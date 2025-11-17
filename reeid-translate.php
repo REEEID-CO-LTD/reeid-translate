@@ -8829,62 +8829,7 @@ wp_enqueue_script( 'reeid-elementor-wires' );
         return "{$home}/{$lang}/{$decoded}/";
     }
 
-/*===========================================================================
-  BODY CLASS FIX FOR TRANSLATED PAGES (ASTRA ONLY)
-  Ensure translated pages are styled as "pages", not "blog singles".
- ===========================================================================*/
-if ( ! function_exists( 'reeid_adjust_body_class_for_lang_pages' ) ) {
-    function reeid_adjust_body_class_for_lang_pages( array $classes, array $class ): array {
-        // Only do anything on Astra theme
-        if ( function_exists( 'wp_get_theme' ) ) {
-            $theme = wp_get_theme();
-            if ( ! $theme || $theme->get_template() !== 'astra' ) {
-                return $classes;
-            }
-        }
 
-        global $post;
-        if ( ! $post || $post->post_type !== 'page' ) {
-            return $classes;
-        }
-
-        // Only touch pages that are REEID translations (have a source post)
-        $src = get_post_meta( $post->ID, '_reeid_translation_source', true );
-        if ( empty( $src ) ) {
-            return $classes;
-        }
-
-        // Only adjust if Astra is currently styling it as a blog single
-        if ( ! in_array( 'ast-blog-single-style-1', $classes, true ) ) {
-            return $classes;
-        }
-
-        // Remove blog/single classes that cause Astra "blog" layout
-        $remove = [
-            'single',
-            'single-page',
-            'ast-blog-single-style-1',
-            'ast-custom-post-type',
-            'ast-single-post',
-        ];
-
-        $classes = array_values( array_diff( $classes, $remove ) );
-
-        // Make sure it looks like a normal page
-        if ( ! in_array( 'page', $classes, true ) ) {
-            $classes[] = 'page';
-        }
-
-        $page_id_class = 'page-id-' . $post->ID;
-        if ( ! in_array( $page_id_class, $classes, true ) ) {
-            $classes[] = $page_id_class;
-        }
-
-        return $classes;
-    }
-
-    add_filter( 'body_class', 'reeid_adjust_body_class_for_lang_pages', 40, 2 );
-}
 
 
  /*==============================================================================
