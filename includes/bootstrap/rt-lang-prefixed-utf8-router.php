@@ -17,18 +17,62 @@ add_action('parse_request', function ($wp) {
     $rest = trim($m[2], '/');
     if ($rest === '') return;
 
-    // UR L DECODE the path pieces for WordPress lookup
+    // URL DECODE the path pieces for WordPress lookup
     $decoded_full = urldecode($rest);
     $decoded_last = urldecode(basename($rest));
 
-    // Feed into main query vars so WP resolves hierarchies properly
-    $wp->query_vars['pagename'] = $decoded_full;
-    $wp->query_vars['name']     = $decoded_last;
-    // Stay broad so pages, CPTs etc. can resolve
-    if (empty($wp->query_vars['post_type'])) {
-        $wp->query_vars['post_type'] = 'any';
+    // Try to detect if this slug actually points to a PAGE.
+    // First try the full path, then just the last segment.
+    $page = get_page_by_path($decoded_full, OBJECT, 'page');
+    if (! $page instanceof WP_Post) {
+        $page = get_page_by_path($decoded_last, OBJECT, 'page');
+    }
+
+        if ($page instanceof WP_Post) {
+        // PAGE MODE:
+        //  - drive query by numeric page_id (most robust)
+        //  - force post_type=page
+        //  - clear name/pagename so WP doesn't treat it as a post query
+        $page_id = (int) $page->ID;
+
+        // Merge into existing vars
+        $wp->query_vars['page_id']   = $page_id;
+        $wp->query_vars['post_type'] = 'page';
+
+        // Ensure these don't interfere
+        unset($wp->query_vars['p']);
+        unset($wp->query_vars['name']);
+        unset($wp->query_vars['pagename']);
+
+        if (defined('REEID_DEBUG') && REEID_DEBUG && function_exists('reeid_debug_log')) {
+            reeid_debug_log('router_page_mode', [
+                'uri'     => isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '',
+                'full'    => $decoded_full,
+                'last'    => $decoded_last,
+                'page_id' => $page_id,
+            ]);
+        }
+    } else {
+
+        // GENERIC MODE:
+        //  - fallback to original behavior so posts/CPTs/products still work
+        $wp->query_vars['pagename'] = $decoded_full;
+        $wp->query_vars['name']     = $decoded_last;
+        // Stay broad so pages, CPTs etc. can resolve
+        if (empty($wp->query_vars['post_type'])) {
+            $wp->query_vars['post_type'] = 'any';
+        }
+
+        if (defined('REEID_DEBUG') && REEID_DEBUG && function_exists('reeid_debug_log')) {
+            reeid_debug_log('router_generic_mode', [
+                'uri'  => isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '',
+                'full' => $decoded_full,
+                'last' => $decoded_last,
+            ]);
+        }
     }
 }, 0);
+
 
 /**
  * Before main query runs, temporarily remove sanitize callbacks from reeid-translate.php
