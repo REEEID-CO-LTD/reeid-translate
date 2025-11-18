@@ -951,18 +951,27 @@ if (! function_exists('reeid_coerce_post_id')) {
 /**
  * Detect editor type for a post. Returns one of: 'elementor', 'gutenberg', 'classic'.
  * Uses safe heuristics based on common postmeta and content.
+ *
+ * IMPORTANT: For translations, this uses the SOURCE post as canonical,
+ * so all children inherit the editor type of the original.
  */
 if (! function_exists('reeid_detect_editor_type')) {
     function reeid_detect_editor_type($post_or_id)
     {
+        // 1) Normalise to post ID
         $post_id = reeid_coerce_post_id($post_or_id);
         if ($post_id <= 0) {
             return 'classic';
         }
 
-        // Elementor detection (meta keys used by Elementor)
-        $edit_mode = get_post_meta($post_id, '_elementor_edit_mode', true);
-        $has_data  = get_post_meta($post_id, '_elementor_data', true);
+        // 2) If this is a translation, use the SOURCE post as canonical
+        //    so all children inherit the editor type of the original.
+        $source_id    = (int) get_post_meta($post_id, '_reeid_translation_source', true);
+        $canonical_id = $source_id > 0 ? $source_id : $post_id;
+
+        // 3) Elementor detection (meta keys used by Elementor)
+        $edit_mode = get_post_meta($canonical_id, '_elementor_edit_mode', true);
+        $has_data  = get_post_meta($canonical_id, '_elementor_data', true);
 
         if (
             'builder' === $edit_mode
@@ -972,15 +981,17 @@ if (! function_exists('reeid_detect_editor_type')) {
             return 'elementor';
         }
 
-        // Gutenberg: lightweight heuristic (blocks present)
-        $post = get_post($post_id);
+        // 4) Gutenberg: lightweight heuristic (blocks present)
+        $post = get_post($canonical_id);
         if ($post && function_exists('has_blocks') && has_blocks($post->post_content)) {
             return 'gutenberg';
         }
 
+        // 5) Fallback: classic editor
         return 'classic';
     }
 }
+
 
 /* --- Small utility wrappers for regex/printf safety --- */
 
