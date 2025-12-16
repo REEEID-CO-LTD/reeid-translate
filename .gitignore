@@ -1,0 +1,33 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Logs & debug
+*.log
+debug.log
+reeid-debug.log
+rt_el_*.log
+
+# Backups
+*.bak
+*.bak_*
+*.old
+*.tmp
+
+# Secrets
+.env
+.env.*
+wp-config.php
+
+# Node / build (if any)
+node_modules/
+dist/
+build/
+
+# Vendor (only if not intended to be committed)
+vendor/
+
+# WP specific
+wp-content/uploads/

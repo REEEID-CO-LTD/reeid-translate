@@ -1,0 +1,21 @@
+<?php
+if (!defined('ABSPATH')) exit;
+
+$pid = get_the_ID();
+if (!$pid || !function_exists('reeid_wc_get_payload')) {
+    wc_get_template('single-product/tabs/description.php');
+    return;
+}
+
+/** Resolve lang from path-first resolver if present */
+$lang = function_exists('_reeid_wc_resolve_lang_v4')
+    ? _reeid_wc_resolve_lang_v4((int)$pid)
+    : (function_exists('reeid_wc_current_lang') ? (string)reeid_wc_current_lang() : '');
+
+$pl = reeid_wc_get_payload((int)$pid, $lang);
+$body = (is_array($pl) && !empty($pl['content']) && is_string($pl['content'])) ? (string)$pl['content'] : '';
+
+if ($body !== '') { echo $body; return; }
+
+/* Fallback to Woo’s default template ONLY when packet content is missing */
+wc_get_template('single-product/tabs/description.php');

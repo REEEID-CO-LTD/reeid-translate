@@ -1,0 +1,114 @@
+<?php
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+add_filter('woocommerce_display_product_attributes', function ($attrs, $product) {
+
+    if (!is_array($attrs)) {
+        error_log('[REEID-ATTR-PROBE] attrs is not array');
+        return $attrs;
+    }
+
+    $sample = [];
+    foreach ($attrs as $k => $v) {
+        $sample[$k] = array_keys((array) $v);
+        break;
+    }
+
+    error_log('[REEID-ATTR-PROBE] keys=' . wp_json_encode(array_keys($attrs)));
+    error_log('[REEID-ATTR-PROBE] sample=' . wp_json_encode($sample));
+
+    return $attrs;
+
+}, 1, 2);
+
+
+
+
+
+
+
+if (function_exists('error_log')) {
+    error_log('REEID_ATTRS_AUTO: loaded');
+}
+
+
+/**
+ * Inline WC attribute injector (packet-based)
+ *
+ * Reads translated attributes from:
+ *   _reeid_wc_tr_{lang}['attributes']
+ *
+ * This is the ONLY correct way for inline Woo translations.
+ */
+add_filter('woocommerce_display_product_attributes', function ($attrs, $product) {
+
+    if (!is_object($product) || !method_exists($product, 'get_id')) {
+        return $attrs;
+    }
+
+    // --- FIX #1: correct language detection ---
+    $lang = function_exists('reeid_wc_current_lang')
+        ? (string) reeid_wc_current_lang()
+        : '';
+
+    // Hard fallback: derive from URL if helper fails
+    if ($lang === '' || $lang === 'en') {
+        $uri = trim($_SERVER['REQUEST_URI'] ?? '', '/');
+        $seg = explode('/', $uri);
+        if (!empty($seg[0]) && strlen($seg[0]) === 2) {
+            $lang = $seg[0];
+        }
+    }
+
+    if ($lang === '' || $lang === 'en') {
+        return $attrs; // source language, do nothing
+    }
+
+    // Get original attributes from DB (always exists)
+    $pid   = (int) $product->get_id();
+    $orig  = get_post_meta($pid, '_product_attributes', true);
+    if (!is_array($orig) || empty($orig)) {
+        return $attrs;
+    }
+
+    foreach ($attrs as $wc_key => &$row) {
+
+        // Woo key format: attribute_{slug}
+        if (strpos($wc_key, 'attribute_') !== 0) {
+            continue;
+        }
+
+        $slug = substr($wc_key, 10); // remove "attribute_"
+
+        if (empty($orig[$slug])) {
+            continue;
+        }
+
+        $src_name  = (string) ($orig[$slug]['name']  ?? '');
+        $src_value = (string) ($orig[$slug]['value'] ?? '');
+
+        if ($src_name === '' && $src_value === '') {
+            continue;
+        }
+
+        if (function_exists('reeid_translate_line')) {
+
+            $tr_name = reeid_translate_line($src_name,  $lang, 'wc_attr_label');
+            $tr_val  = reeid_translate_line($src_value, $lang, 'wc_attr_value');
+
+            if ($tr_name !== '') {
+                $row['label'] = esc_html($tr_name);
+            }
+
+            if ($tr_val !== '') {
+                $row['value'] = esc_html($tr_val);
+            }
+        }
+    }
+    unset($row);
+
+    return $attrs;
+
+}, 20, 2);
