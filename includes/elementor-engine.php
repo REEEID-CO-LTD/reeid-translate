@@ -321,6 +321,7 @@ $api = apply_filters(
  * Main S13 entry (used by SECTION 16 AJAX)
  */
 if (! function_exists('reeid_elementor_translate_json_s13')) {
+    
     function reeid_elementor_translate_json_s13(int $post_id, string $source_lang, string $target_lang, string $tone = 'Neutral', string $prompt = ''): array
     {
 

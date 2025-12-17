@@ -379,7 +379,18 @@ if (! empty($res['data']) && is_array($res['data'])) {
         // Last-resort: minimal meta write, but make sure we mark as builder.
         $json = wp_json_encode($res['data'], JSON_UNESCAPED_UNICODE);
         if ($json !== false) {
-            update_post_meta($__reeid_inject_target, '_elementor_data', wp_slash($json));
+// Normalize Elementor JSON to avoid <\/tag> being stored
+$__dec = json_decode($json, true);
+if (is_array($__dec)) {
+    $json = wp_json_encode($__dec, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+// Normalize escaped closing tags from JSON transport
+$json = str_replace('<\\/', '</', $json);
+
+// Store raw JSON (no wp_slash — JSON already escaped correctly)
+update_post_meta($__reeid_inject_target, '_elementor_data', $json);
+
             update_post_meta($__reeid_inject_target, '_elementor_edit_mode', 'builder');
             update_post_meta(
                 $__reeid_inject_target,
@@ -714,64 +725,75 @@ if ($editor === 'elementor') {
     }
 
             // Elementor branch: commit translated tree + ensure meta and CSS
-    if (isset($result['data'])) {
+if (isset($result['data'])) {
 
-        // 1) Prefer the dedicated saver so JSON + meta + CSS are consistent
-        if (function_exists('reeid_elementor_commit_post')) {
-            reeid_elementor_commit_post($target_id, $result['data']);
-
-        } else {
-            // 2) Fallback: minimal meta write with proper JSON + slashing
-            $elem_json = is_array($result['data'])
-                ? wp_json_encode($result['data'], JSON_UNESCAPED_UNICODE)
-                : (string) $result['data'];
-
-            if (is_string($elem_json) && $elem_json !== '') {
-                update_post_meta($target_id, '_elementor_data', wp_slash($elem_json));
+    // --- NORMALIZE ELEMENTOR ARRAY FIRST (CRITICAL) ---
+    if (is_array($result['data'])) {
+        array_walk_recursive($result['data'], function (&$v) {
+            if (is_string($v)) {
+                $v = str_replace('<\/', '</', $v);
             }
+        });
+    }
 
-            update_post_meta($target_id, '_elementor_edit_mode', 'builder');
+    // 1) Prefer the dedicated saver so JSON + meta + CSS are consistent
+    if (function_exists('reeid_elementor_commit_post')) {
 
-            $ptype = get_post_type($target_id);
-            $tmpl  = ($ptype === 'page') ? 'wp-page' : 'wp-post';
-            update_post_meta($target_id, '_elementor_template_type', $tmpl);
+        // Always pass CLEAN data
+        reeid_elementor_commit_post($target_id, $result['data']);
 
-            $ver = get_option('elementor_version');
-            if (! $ver && defined('ELEMENTOR_VERSION')) {
-                $ver = ELEMENTOR_VERSION;
-            }
-            if ($ver) {
-                update_post_meta($target_id, '_elementor_data_version', $ver);
-            }
+    } else {
+
+        // 2) Fallback: encode clean Elementor JSON
+        $elem_json = is_array($result['data'])
+            ? wp_json_encode(
+                $result['data'],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            )
+            : (string) $result['data'];
+
+        if ($elem_json !== '') {
+            update_post_meta($target_id, '_elementor_data', $elem_json);
         }
 
-        // 3) Copy template type from source if it exists (Astra & co)
-        $tpl_type = get_post_meta($post_id, '_elementor_template_type', true);
-        if (!empty($tpl_type)) {
-            update_post_meta($target_id, '_elementor_template_type', $tpl_type);
+        update_post_meta($target_id, '_elementor_edit_mode', 'builder');
+
+        $ptype = get_post_type($target_id);
+        $tmpl  = ($ptype === 'page') ? 'wp-page' : 'wp-post';
+        update_post_meta($target_id, '_elementor_template_type', $tmpl);
+
+        $ver = get_option('elementor_version');
+        if (! $ver && defined('ELEMENTOR_VERSION')) {
+            $ver = ELEMENTOR_VERSION;
         }
-
-        // 4) Clear Elementor caches defensively & version-safe
-        if (did_action('elementor/loaded')) {
-            try {
-                if (class_exists('\Elementor\Core\Files\CSS\Post')) {
-                    $css = new \Elementor\Core\Files\CSS\Post($target_id);
-                    if (method_exists($css, 'delete')) {
-                        $css->delete();
-                    }
-                    if (method_exists($css, 'update')) {
-                        $css->update();
-                    }
-                }
-
-                if (isset(\Elementor\Plugin::$instance->files_manager)) {
-                    \Elementor\Plugin::$instance->files_manager->clear_cache();
-                }
-            } catch (\Throwable $e) {
-                // ignore cache errors
-            }
+        if ($ver) {
+            update_post_meta($target_id, '_elementor_data_version', $ver);
         }
     }
+
+    // 3) Copy template type from source if it exists
+    $tpl_type = get_post_meta($post_id, '_elementor_template_type', true);
+    if (!empty($tpl_type)) {
+        update_post_meta($target_id, '_elementor_template_type', $tpl_type);
+    }
+
+    // 4) Clear Elementor caches
+    if (did_action('elementor/loaded')) {
+        try {
+            if (class_exists('\Elementor\Core\Files\CSS\Post')) {
+                $css = new \Elementor\Core\Files\CSS\Post($target_id);
+                if (method_exists($css, 'delete')) $css->delete();
+                if (method_exists($css, 'update')) $css->update();
+            }
+
+            if (isset(\Elementor\Plugin::$instance->files_manager)) {
+                \Elementor\Plugin::$instance->files_manager->clear_cache();
+            }
+        } catch (\Throwable $e) {
+            // ignore
+        }
+    }
+}
 
 
 
@@ -1312,7 +1334,10 @@ $excerpt = $result['excerpt'] ?? $excerpt;
 $content = $result['content'] ?? $content;
 $slug    = $result['slug']    ?? $slug;
 
-} elseif (function_exists('reeid_translate_via_openai_with_slug')) {
+} elseif (
+    $editor !== 'elementor'
+    && function_exists('reeid_translate_via_openai_with_slug')
+) {
 
 
                         $ctx = [

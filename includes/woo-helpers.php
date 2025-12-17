@@ -1008,19 +1008,37 @@ if (! function_exists('reeid_elementor_commit_post')) {
      */
     function reeid_elementor_commit_post(int $post_id, $elementor_data): void
     {
-        // Normalize to JSON string
-        if (is_array($elementor_data)) {
-            $json = wp_json_encode($elementor_data, JSON_UNESCAPED_UNICODE);
-        } else {
-            $json = (string) $elementor_data;
+        // Always normalize to ARRAY first (CRITICAL)
+        if (is_string($elementor_data)) {
+            $decoded = json_decode($elementor_data, true);
+
+            if (! is_array($decoded)) {
+                // Invalid or already-corrupted JSON → do NOT save
+                return;
+            }
+
+            $elementor_data = $decoded;
         }
+
+        if (! is_array($elementor_data)) {
+            return;
+        }
+
+        // Encode ONCE, without escaping HTML
+        $json = wp_json_encode($elementor_data, JSON_UNESCAPED_UNICODE);
 
         if (! is_string($json) || $json === '') {
             return;
         }
 
-        // Store JSON in meta with proper slashing
-        update_post_meta($post_id, '_elementor_data', wp_slash($json));
+        
+// Normalize JSON once so closing tags are not stored as <\/...> (Elementor renders those as text)
+$__dec = json_decode($json, true);
+if (is_array($__dec)) {
+    $json = wp_json_encode($__dec, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+update_post_meta($post_id, '_elementor_data', wp_slash($json));
 
         // Ensure Elementor builder meta is set
         update_post_meta($post_id, '_elementor_edit_mode', 'builder');
@@ -1029,13 +1047,13 @@ if (! function_exists('reeid_elementor_commit_post')) {
         $tmpl  = ($ptype === 'page') ? 'wp-page' : 'wp-post';
         update_post_meta($post_id, '_elementor_template_type', $tmpl);
 
-        // Keep/clone page settings (layout, width, etc.)
+        // Preserve page settings
         $ps = get_post_meta($post_id, '_elementor_page_settings', true);
-        if (is_array($ps) || is_object($ps)) {
+        if (is_array($ps)) {
             update_post_meta($post_id, '_elementor_page_settings', $ps);
         }
 
-        // Data version: prefer Elementor version, fallback to timestamp
+        // Data version
         $ver = get_option('elementor_version');
         if (! $ver && defined('ELEMENTOR_VERSION')) {
             $ver = ELEMENTOR_VERSION;
@@ -1049,31 +1067,29 @@ if (! function_exists('reeid_elementor_commit_post')) {
         // Clean legacy CSS meta
         delete_post_meta($post_id, '_elementor_css');
 
-        // Regenerate CSS in a version-safe way
+        // Regenerate CSS
         if (did_action('elementor/loaded')) {
             try {
                 if (class_exists('\Elementor\Core\Files\CSS\Post')) {
                     $css = new \Elementor\Core\Files\CSS\Post($post_id);
-
                     if (method_exists($css, 'delete')) {
                         $css->delete();
                     }
-
                     if (method_exists($css, 'update')) {
                         $css->update();
                     }
                 }
 
-                // Global cache clear – safe across Elementor versions
                 if (isset(\Elementor\Plugin::$instance->files_manager)) {
                     \Elementor\Plugin::$instance->files_manager->clear_cache();
                 }
             } catch (\Throwable $e) {
-                // Silently ignore CSS regen failures
+                // ignore
             }
         }
     }
 }
+
 
 
 
