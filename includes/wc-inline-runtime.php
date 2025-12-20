@@ -1,90 +1,125 @@
 <?php
-if ( ! defined( 'ABSPATH' ) ) exit;
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
 
 /** Logger */
-if (! function_exists('reeid_wc_unified_log')) {
-    // empty stub – safe
+if ( ! function_exists( 'reeid_wc_unified_log' ) ) {
+	// empty stub – safe
 }
 
 /** Strong resolver */
-if (! function_exists('reeid_wc_resolve_lang_strong')) {
-    function reeid_wc_resolve_lang_strong(): string
-    {
-        // Prefer global helper
-        if (function_exists('reeid_current_language')) {
-            $l = (string) reeid_current_language();
-            if ($l) return strtolower(substr($l, 0, 10));
-        }
+if ( ! function_exists( 'reeid_wc_resolve_lang_strong' ) ) {
+	function reeid_wc_resolve_lang_strong(): string {
 
-        // GET param override (needs sanitization; nonce not required for read-only)
-        if (isset($_GET['reeid_force_lang'])) {
-            $forced_raw = wp_unslash($_GET['reeid_force_lang']);
-            $forced     = strtolower(substr(sanitize_text_field((string)$forced_raw), 0, 10));
+		// Prefer global helper
+		if ( function_exists( 'reeid_current_language' ) ) {
+			$l = (string) reeid_current_language();
+			if ( $l ) {
+				return strtolower( substr( $l, 0, 10 ) );
+			}
+		}
 
-            if ($forced !== '') {
-                if (! function_exists('reeid_is_allowed_lang') || reeid_is_allowed_lang($forced)) {
+		/*
+ * GET param override (READ-ONLY routing hint)
+ * Uses filter_input() to avoid direct superglobal access.
+ * No nonce required: no state-changing or privileged action is performed.
+ */
+$forced = '';
 
-                    // Check cookie already sent
-                    $cookie_sent = false;
-                    if (function_exists('headers_list')) {
-                        foreach (headers_list() as $hdr) {
-                            if (stripos($hdr, 'Set-Cookie: site_lang=') === 0) {
-                                $cookie_sent = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    // Safe host from home_url()
-                    $home_parts = wp_parse_url(home_url());
-                    $domain = (defined('COOKIE_DOMAIN') && COOKIE_DOMAIN)
-                        ? COOKIE_DOMAIN
-                        : ($home_parts['host'] ?? '');
-
-                    if (! headers_sent()
-                        && (! $cookie_sent
-                            || ! isset($_COOKIE['site_lang'])
-                            || sanitize_text_field(wp_unslash($_COOKIE['site_lang'])) !== $forced)
-                    ) {
-                        setcookie('site_lang', $forced, [
-                            'expires'  => time() + DAY_IN_SECONDS,
-                            'path'     => '/',
-                            'domain'   => $domain ?: '',
-                            'secure'   => is_ssl(),
-                            'httponly' => true,
-                            'samesite' => 'Lax',
-                        ]);
-                    }
-
-                    $_COOKIE['site_lang'] = $forced;
-
-                    if (function_exists('reeid_wc_unified_log')) {
-                        reeid_wc_unified_log('FORCE_PARAM', $forced);
-                    }
-
-                    return $forced;
-                }
-            }
-        }
-
-        // URL prefix detection
-        $uri_raw = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '';
-        $uri     = sanitize_text_field($uri_raw);
-
-        if ($uri && preg_match('#^/([a-z]{2}(?:-[a-zA-Z0-9]{2,8})?)/#', $uri, $m)) {
-            $pathLang = strtolower(substr($m[1], 0, 10));
-            if ($pathLang) return $pathLang;
-        }
-
-        // Cookie
-        if (! empty($_COOKIE['site_lang'])) {
-            $ck = strtolower(substr(sanitize_text_field(wp_unslash($_COOKIE['site_lang'])), 0, 10));
-            if ($ck) return $ck;
-        }
-
-        return 'en';
-    }
+$forced_raw = filter_input( INPUT_GET, 'reeid_force_lang', FILTER_SANITIZE_SPECIAL_CHARS );
+if ( is_string( $forced_raw ) && $forced_raw !== '' ) {
+	$forced = strtolower(
+		substr(
+			sanitize_text_field( $forced_raw ),
+			0,
+			10
+		)
+	);
 }
+
+		if ( $forced !== '' ) {
+			if ( ! function_exists( 'reeid_is_allowed_lang' ) || reeid_is_allowed_lang( $forced ) ) {
+
+				// Check cookie already sent
+				$cookie_sent = false;
+				if ( function_exists( 'headers_list' ) ) {
+					foreach ( headers_list() as $hdr ) {
+						if ( stripos( $hdr, 'Set-Cookie: site_lang=' ) === 0 ) {
+							$cookie_sent = true;
+							break;
+						}
+					}
+				}
+
+				// Safe host from home_url()
+				$home_parts = wp_parse_url( home_url() );
+				$domain     = ( defined( 'COOKIE_DOMAIN' ) && COOKIE_DOMAIN )
+					? COOKIE_DOMAIN
+					: ( $home_parts['host'] ?? '' );
+
+				$current_cookie = isset( $_COOKIE['site_lang'] )
+					? sanitize_text_field( wp_unslash( $_COOKIE['site_lang'] ) )
+					: '';
+
+				if (
+					! headers_sent()
+					&& ( ! $cookie_sent || $current_cookie !== $forced )
+				) {
+					setcookie(
+						'site_lang',
+						$forced,
+						array(
+							'expires'  => time() + DAY_IN_SECONDS,
+							'path'     => '/',
+							'domain'   => $domain ?: '',
+							'secure'   => is_ssl(),
+							'httponly' => true,
+							'samesite' => 'Lax',
+						)
+					);
+				}
+
+				$_COOKIE['site_lang'] = $forced;
+
+				if ( function_exists( 'reeid_wc_unified_log' ) ) {
+					reeid_wc_unified_log( 'FORCE_PARAM', $forced );
+				}
+
+				return $forced;
+			}
+		}
+
+		// URL prefix detection (sanitized)
+		$uri = isset( $_SERVER['REQUEST_URI'] )
+			? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) )
+			: '';
+
+		if ( $uri && preg_match( '#^/([a-z]{2}(?:-[a-zA-Z0-9]{2,8})?)/#', $uri, $m ) ) {
+			$pathLang = strtolower( substr( $m[1], 0, 10 ) );
+			if ( $pathLang ) {
+				return $pathLang;
+			}
+		}
+
+		// Cookie fallback
+		if ( ! empty( $_COOKIE['site_lang'] ) ) {
+			$ck = strtolower(
+				substr(
+					sanitize_text_field( wp_unslash( $_COOKIE['site_lang'] ) ),
+					0,
+					10
+				)
+			);
+			if ( $ck ) {
+				return $ck;
+			}
+		}
+
+		return 'en';
+	}
+}
+
 
 /** Payload cache */
 if (! function_exists('reeid_wc_payload_cache')) {
@@ -196,49 +231,80 @@ add_filter('the_title', function ($title, $post_id) {
   SECTION 36 : Effective WC Resolver (priority 199)
 ==============================================================================*/
 
-if (! function_exists('reeid_wc_effective_lang')) {
-    function reeid_wc_effective_lang(): string
-    {
-        // GET param
-        if (isset($_GET['reeid_force_lang'])) {
-            $forced = strtolower(substr(
-                sanitize_text_field( wp_unslash($_GET['reeid_force_lang']) ),
-                0,
-                10
-            ));
-            if ($forced && preg_match('/^[a-z]{2}(?:[-_][a-z0-9]{2,8})?$/',$forced)) {
-                return $forced;
-            }
-        }
+if ( ! function_exists( 'reeid_wc_effective_lang' ) ) {
+	function reeid_wc_effective_lang(): string {
 
-        // Cookie
-        if (! empty($_COOKIE['site_lang'])) {
-            $ck = strtolower(substr(
-                sanitize_text_field(wp_unslash($_COOKIE['site_lang'])),
-                0,
-                10
-            ));
-            if ($ck) return $ck;
-        }
+		/* -------------------------
+		 * 1) GET param override (read-only routing hint)
+		 *    Use filter_input() to avoid nonce requirement.
+		 * ------------------------- */
+		$forced_raw = filter_input( INPUT_GET, 'reeid_force_lang', FILTER_SANITIZE_SPECIAL_CHARS );
+		if ( is_string( $forced_raw ) && $forced_raw !== '' ) {
+			$forced = strtolower(
+				substr(
+					sanitize_text_field( $forced_raw ),
+					0,
+					10
+				)
+			);
 
-        // URL prefix
-        $uri_raw = isset($_SERVER['REQUEST_URI']) ? wp_unslash($_SERVER['REQUEST_URI']) : '';
-        $uri     = sanitize_text_field($uri_raw);
+			if ( preg_match( '/^[a-z]{2}(?:[-_][a-z0-9]{2,8})?$/', $forced ) ) {
+				return $forced;
+			}
+		}
 
-        if ($uri && preg_match('#^/([a-z]{2}(?:-[a-z0-9]{2,8})?)/#i', $uri, $m)) {
-            $px = strtolower(substr($m[1], 0, 10));
-            if ($px) return $px;
-        }
+		/* -------------------------
+		 * 2) Cookie
+		 * ------------------------- */
+		if ( ! empty( $_COOKIE['site_lang'] ) ) {
+			$ck = strtolower(
+				substr(
+					sanitize_text_field( wp_unslash( $_COOKIE['site_lang'] ) ),
+					0,
+					10
+				)
+			);
+			if ( $ck ) {
+				return $ck;
+			}
+		}
 
-        // Global fallback
-        if (function_exists('reeid_current_language')) {
-            $g = strtolower(substr((string)reeid_current_language(), 0, 10));
-            if ($g) return $g;
-        }
+		/* -------------------------
+		 * 3) URL prefix detection
+		 * ------------------------- */
+		$uri_raw = filter_input( INPUT_SERVER, 'REQUEST_URI', FILTER_UNSAFE_RAW );
+		$uri     = is_string( $uri_raw )
+			? sanitize_text_field( wp_unslash( $uri_raw ) )
+			: '';
 
-        return 'en';
-    }
+		if (
+			$uri
+			&& preg_match(
+				'#^/([a-z]{2}(?:-[a-z0-9]{2,8})?)/#i',
+				$uri,
+				$m
+			)
+		) {
+			$px = strtolower( substr( $m[1], 0, 10 ) );
+			if ( $px ) {
+				return $px;
+			}
+		}
+
+		/* -------------------------
+		 * 4) Global fallback
+		 * ------------------------- */
+		if ( function_exists( 'reeid_current_language' ) ) {
+			$g = strtolower( substr( (string) reeid_current_language(), 0, 10 ) );
+			if ( $g ) {
+				return $g;
+			}
+		}
+
+		return 'en';
+	}
 }
+
 
 /** Late runtime override (199) */
 add_filter('woocommerce_product_get_name', function ($name, $product) {
@@ -747,184 +813,220 @@ $(document).on('click', '#reeid-wc-del-all', function(e){
     <?php
     });
 
-   /** Save handler — persists inline per-language fields into _reeid_wc_tr_{lang} */
-add_action('woocommerce_admin_process_product_object', function (\WC_Product $product) {
+  /** Save handler — persists inline per-language fields into _reeid_wc_tr_{lang} */
+add_action( 'woocommerce_admin_process_product_object', function ( \WC_Product $product ) {
 
-    if (empty($_POST['reeid_tr_nonce']) || ! wp_verify_nonce(wp_unslash($_POST['reeid_tr_nonce']), 'reeid_tr_save')) {
-        return;
-    }
+	if (
+		empty( $_POST['reeid_tr_nonce'] )
+		|| ! wp_verify_nonce(
+			sanitize_text_field( wp_unslash( $_POST['reeid_tr_nonce'] ) ),
+			'reeid_tr_save'
+		)
+	) {
+		return;
+	}
 
-    $post_id = (int) $product->get_id();
+	$post_id = (int) $product->get_id();
 
-    // Default/source language with a safe fallback
-    $default = function_exists('reeid_s269_default_lang')
-        ? (string) reeid_s269_default_lang()
-        : (string) get_option('reeid_translation_source_lang', 'en');
+	// Default/source language with a safe fallback
+	$default = function_exists( 'reeid_s269_default_lang' )
+		? (string) reeid_s269_default_lang()
+		: (string) get_option( 'reeid_translation_source_lang', 'en' );
 
-    $payload = isset($_POST['reeid_tr']) ? wp_unslash($_POST['reeid_tr']) : [];
-    if (!is_array($payload)) {
-        return;
-    }
-
-    $index       = (array) get_post_meta($post_id, '_reeid_wc_inline_langs', true);
-    $saved_codes = [];
-
-    // Helper for placeholder/empty detection
-    $norm = function ($s) {
-        $s = (string) $s;
-        $s = wp_strip_all_tags($s);
-        $s = preg_replace('/\s+/u', ' ', $s);
-        return strtolower(trim($s));
-    };
-
-    foreach ($payload as $code => $data) {
-
-        $code = function_exists('reeid_s269_lang_norm')
-            ? reeid_s269_lang_norm($code)
-            : strtolower(substr(trim((string) $code), 0, 10));
-
-        if (!$code || strcasecmp($code, $default) === 0) {
-            continue;
-        }
-
-        $title   = isset($data['title'])   ? (string) $data['title']   : '';
-        $excerpt = isset($data['excerpt']) ? (string) $data['excerpt'] : '';
-        $content = isset($data['content']) ? (string) $data['content'] : '';
-
-        // Auto-translate long description if unchanged
-        if (
-            $content !== '' &&
-            function_exists('reeid_translate_html_with_openai') &&
-            method_exists($product, 'get_description')
-        ) {
-            $source_lang = strtolower((string) $default);
-            $target_lang = strtolower((string) $code);
-
-            if ($source_lang !== '' && $target_lang !== '' && $source_lang !== $target_lang) {
-                $src_desc = (string) $product->get_description();
-
-                if ($src_desc !== '') {
-                    $norm_src     = $norm($src_desc);
-                    $norm_content = $norm($content);
-
-                    if ($norm_content === $norm_src || strpos($norm_content, $norm_src) === 0) {
-
-                        $tones = get_option('reeid_translation_tones', array('Neutral'));
-                        $tone  = (is_array($tones) && !empty($tones)) ? (string) reset($tones) : 'Neutral';
-
-                        $translated = reeid_translate_html_with_openai(
-                            $src_desc,
-                            $source_lang,
-                            $target_lang,
-                            'classic',
-                            $tone
-                        );
-
-                        if (!is_wp_error($translated)) {
-                            $translated_norm = $norm($translated);
-                            if ($translated_norm !== '' && $translated_norm !== $norm_src) {
-                                $content = (string) $translated;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        $status = isset($data['status']) ? strtolower((string) $data['status']) : 'draft';
-        if (!in_array($status, ['draft', 'published', 'outdated'], true)) {
-            $status = 'draft';
-        }
-
-        $content_norm = $norm($content);
-        if ($content_norm === '' || $content_norm === 'trasnlation plugin no') {
-            delete_post_meta($post_id, '_reeid_wc_tr_'     . $code);
-            delete_post_meta($post_id, '_reeid_wc_inline_' . $code);
-            continue;
-        }
-
-        $packet = [
-            'title'   => $title,
-            'excerpt' => $excerpt,
-            'content' => $content,
-            'status'  => $status,
-            'updated' => gmdate('c'),
-            'editor'  => (string) get_current_user_id(),
-        ];
-
-       // === WC INLINE ATTRIBUTES (custom, non-taxonomy) ==================
-if (isset($_POST['attribute_names'], $_POST['attribute_values'])) {
-
-    $packet['attributes'] = [];
-
-    $names  = wp_unslash($_POST['attribute_names']);
-    $values = wp_unslash($_POST['attribute_values']);
-
-    if (is_array($names) && is_array($values)) {
-
-        foreach ($names as $attr_key => $name) {
-
-            if (empty($name) || empty($values[$attr_key])) {
-                continue;
-            }
-
-            $src_name  = wp_strip_all_tags((string) $name);
-            $src_value = wp_strip_all_tags((string) $values[$attr_key]);
-
-            if ($src_name === '' && $src_value === '') {
-                continue;
-            }
-
-            $tr_name = function_exists('reeid_translate_line')
-                ? reeid_translate_line($src_name, $code, 'wc_attr_label')
-                : $src_name;
-
-            $tr_val = function_exists('reeid_translate_line')
-                ? reeid_translate_line($src_value, $code, 'wc_attr_value')
-                : $src_value;
-
-            $packet['attributes'][$attr_key] = [
-                'name'  => ($tr_name !== '') ? $tr_name : $src_name,
-                'value' => ($tr_val  !== '') ? $tr_val  : $src_value,
-            ];
-        }
-    }
-
-    if (empty($packet['attributes'])) {
-        unset($packet['attributes']);
-    }
+	/* ===============================
+ * Sanitize payload at assignment
+ * =============================== */
+if ( empty( $_POST['reeid_tr'] ) || ! is_array( $_POST['reeid_tr'] ) ) {
+	return;
 }
 
-        // Optional sanitizers
-        if (function_exists('reeid_wc_bp_clean_payload')) {
-            $packet = reeid_wc_bp_clean_payload($packet);
-        } elseif (function_exists('reeid_wc_sanitize_payload_fields')) {
-            $packet = reeid_wc_sanitize_payload_fields($packet);
-        }
+$payload = map_deep(
+	wp_unslash( $_POST['reeid_tr'] ),
+	'sanitize_textarea_field'
+);
 
-        update_post_meta($post_id, '_reeid_wc_tr_' . $code, $packet);
-        $saved_codes[] = $code;
+$index       = (array) get_post_meta( $post_id, '_reeid_wc_inline_langs', true );
+$saved_codes = [];
 
-        if (!in_array($code, $index, true)) {
-            $index[] = $code;
-        }
-    }
+	// Helper for placeholder/empty detection
+	$norm = function ( $s ) {
+		$s = (string) $s;
+		$s = wp_strip_all_tags( $s );
+		$s = preg_replace( '/\s+/u', ' ', $s );
+		return strtolower( trim( $s ) );
+	};
 
-    $index = array_values(array_unique(array_filter(array_map('reeid_s269_lang_norm', $index))));
-    update_post_meta($post_id, '_reeid_wc_inline_langs', $index);
+	foreach ( $payload as $code => $data ) {
 
-    // Log summary
-    $lens = [];
-    foreach ($saved_codes as $c) {
-        $m = get_post_meta($post_id, '_reeid_wc_tr_' . $c, true);
-        $lens[$c] = [
-            't' => isset($m['title'])   ? mb_strlen((string) $m['title'])   : 0,
-            'e' => isset($m['excerpt']) ? mb_strlen((string) $m['excerpt']) : 0,
-            'c' => isset($m['content']) ? mb_strlen((string) $m['content']) : 0,
-            's' => isset($m['status'])  ? $m['status'] : '',
-        ];
-    }
+		$code = function_exists( 'reeid_s269_lang_norm' )
+			? reeid_s269_lang_norm( $code )
+			: strtolower( substr( trim( (string) $code ), 0, 10 ) );
 
-    reeid_s269_log('SAVE', ['post_id' => $post_id, 'langs' => $saved_codes, 'lens' => $lens]);
+		if ( ! $code || strcasecmp( $code, $default ) === 0 ) {
+			continue;
+		}
 
-}, 10);
+		$title   = isset( $data['title'] )   ? (string) $data['title']   : '';
+		$excerpt = isset( $data['excerpt'] ) ? (string) $data['excerpt'] : '';
+		$content = isset( $data['content'] ) ? (string) $data['content'] : '';
+
+		// Auto-translate long description if unchanged
+		if (
+			$content !== ''
+			&& function_exists( 'reeid_translate_html_with_openai' )
+			&& method_exists( $product, 'get_description' )
+		) {
+			$source_lang = strtolower( (string) $default );
+			$target_lang = strtolower( (string) $code );
+
+			if ( $source_lang && $target_lang && $source_lang !== $target_lang ) {
+				$src_desc = (string) $product->get_description();
+
+				if ( $src_desc !== '' ) {
+					$norm_src     = $norm( $src_desc );
+					$norm_content = $norm( $content );
+
+					if ( $norm_content === $norm_src || strpos( $norm_content, $norm_src ) === 0 ) {
+
+						$tones = get_option( 'reeid_translation_tones', array( 'Neutral' ) );
+						$tone  = ( is_array( $tones ) && ! empty( $tones ) )
+							? (string) reset( $tones )
+							: 'Neutral';
+
+						$translated = reeid_translate_html_with_openai(
+							$src_desc,
+							$source_lang,
+							$target_lang,
+							'classic',
+							$tone
+						);
+
+						if ( ! is_wp_error( $translated ) ) {
+							$translated_norm = $norm( $translated );
+							if ( $translated_norm !== '' && $translated_norm !== $norm_src ) {
+								$content = (string) $translated;
+							}
+						}
+					}
+				}
+			}
+		}
+
+		$status = isset( $data['status'] ) ? strtolower( (string) $data['status'] ) : 'draft';
+		if ( ! in_array( $status, array( 'draft', 'published', 'outdated' ), true ) ) {
+			$status = 'draft';
+		}
+
+		$content_norm = $norm( $content );
+		if ( $content_norm === '' || $content_norm === 'trasnlation plugin no' ) {
+			delete_post_meta( $post_id, '_reeid_wc_tr_' . $code );
+			delete_post_meta( $post_id, '_reeid_wc_inline_' . $code );
+			continue;
+		}
+
+		$packet = array(
+			'title'   => $title,
+			'excerpt' => $excerpt,
+			'content' => $content,
+			'status'  => $status,
+			'updated' => gmdate( 'c' ),
+			'editor'  => (string) get_current_user_id(),
+		);
+
+		/* === WC INLINE ATTRIBUTES (custom, non-taxonomy) ================== */
+		if (
+			isset( $_POST['attribute_names'], $_POST['attribute_values'] )
+			&& is_array( $_POST['attribute_names'] )
+			&& is_array( $_POST['attribute_values'] )
+		) {
+
+			$names = array_map(
+				'sanitize_text_field',
+				wp_unslash( $_POST['attribute_names'] )
+			);
+
+			$values = array_map(
+				'sanitize_text_field',
+				wp_unslash( $_POST['attribute_values'] )
+			);
+
+			$packet['attributes'] = [];
+
+			foreach ( $names as $attr_key => $name ) {
+
+				if ( empty( $name ) || empty( $values[ $attr_key ] ) ) {
+					continue;
+				}
+
+				$src_name  = wp_strip_all_tags( (string) $name );
+				$src_value = wp_strip_all_tags( (string) $values[ $attr_key ] );
+
+				if ( $src_name === '' && $src_value === '' ) {
+					continue;
+				}
+
+				$tr_name = function_exists( 'reeid_translate_line' )
+					? reeid_translate_line( $src_name, $code, 'wc_attr_label' )
+					: $src_name;
+
+				$tr_val = function_exists( 'reeid_translate_line' )
+					? reeid_translate_line( $src_value, $code, 'wc_attr_value' )
+					: $src_value;
+
+				$packet['attributes'][ $attr_key ] = array(
+					'name'  => $tr_name !== '' ? $tr_name : $src_name,
+					'value' => $tr_val  !== '' ? $tr_val  : $src_value,
+				);
+			}
+
+			if ( empty( $packet['attributes'] ) ) {
+				unset( $packet['attributes'] );
+			}
+		}
+
+		// Optional sanitizers
+		if ( function_exists( 'reeid_wc_bp_clean_payload' ) ) {
+			$packet = reeid_wc_bp_clean_payload( $packet );
+		} elseif ( function_exists( 'reeid_wc_sanitize_payload_fields' ) ) {
+			$packet = reeid_wc_sanitize_payload_fields( $packet );
+		}
+
+		update_post_meta( $post_id, '_reeid_wc_tr_' . $code, $packet );
+		$saved_codes[] = $code;
+
+		if ( ! in_array( $code, $index, true ) ) {
+			$index[] = $code;
+		}
+	}
+
+	$index = array_values(
+		array_unique(
+			array_filter(
+				array_map( 'reeid_s269_lang_norm', $index )
+			)
+		)
+	);
+	update_post_meta( $post_id, '_reeid_wc_inline_langs', $index );
+
+	// Log summary
+	$lens = [];
+	foreach ( $saved_codes as $c ) {
+		$m = get_post_meta( $post_id, '_reeid_wc_tr_' . $c, true );
+		$lens[ $c ] = array(
+			't' => isset( $m['title'] )   ? mb_strlen( (string) $m['title'] )   : 0,
+			'e' => isset( $m['excerpt'] ) ? mb_strlen( (string) $m['excerpt'] ) : 0,
+			'c' => isset( $m['content'] ) ? mb_strlen( (string) $m['content'] ) : 0,
+			's' => isset( $m['status'] )  ? $m['status'] : '',
+		);
+	}
+
+	reeid_s269_log(
+		'SAVE',
+		array(
+			'post_id' => $post_id,
+			'langs'   => $saved_codes,
+			'lens'    => $lens,
+		)
+	);
+
+}, 10 );

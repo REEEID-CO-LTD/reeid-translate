@@ -406,86 +406,95 @@ function reeid_render_settings_page()
             }
 
             // Block direct access to disabled Jobs tab
-            if (isset($_GET['tab']) && $_GET['tab'] === 'jobs' && ! (defined('REEID_SHOW_JOBS_TAB') && REEID_SHOW_JOBS_TAB)) {
-                wp_die(esc_html__('This view is disabled.', 'reeid-translate'));
-            }
+if (
+	isset( $_GET['tab'], $_GET['_wpnonce'] )
+	&& 'jobs' === sanitize_key( wp_unslash( $_GET['tab'] ) )
+	&& wp_verify_nonce(
+		sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) ),
+		'reeid_settings_tab'
+	)
+	&& ! ( defined( 'REEID_SHOW_JOBS_TAB' ) && REEID_SHOW_JOBS_TAB )
+) {
+	wp_die( esc_html__( 'This view is disabled.', 'reeid-translate' ) );
+}
 
-            foreach ($tabs as $slug => $label) {
-                $url = add_query_arg(array(
-                    'page' => 'reeid-translate-settings',
-                    'tab'  => $slug,
-                ), $base);
-                $cls = 'nav-tab' . ($active_tab === $slug ? ' nav-tab-active' : '');
-                echo '<a href="' . esc_url($url) . '" class="' . esc_attr($cls) . '">' . esc_html($label) . '</a>';
-            }
-            ?>
-        </h2>
 
-        <div class="reeid-tab-content">
-            <?php
-            switch ($active_tab) {
-                case 'tools':
-                    reeid_render_tools_tab();
-                    break;
-                case 'jobs':
-                    reeid_render_jobs_tab();
-                    break;
-                case 'faq':
-                    reeid_render_faq_tab();
-                    break;
-                case 'info':
-                    reeid_render_info_tab();
-                    break;
-                case 'stat':
-                    if (function_exists('reeid_render_stat_tab')) {
-                        reeid_render_stat_tab();
-                    } else {
-                        echo '<p>' . esc_html__('Stat tab not available.', 'reeid-translate') . '</p>';
-                    }
-                    break;
-                case 'settings':
-                default:
-                    reeid_render_settings_tab();
-                    break;
-            }
-            ?>
-        </div>
-    </div>
+foreach ( $tabs as $slug => $label ) {
+	$url = add_query_arg(
+		array(
+			'page' => 'reeid-translate-settings',
+			'tab'  => $slug,
+		),
+		$base
+	);
+	$cls = 'nav-tab' . ( $active_tab === $slug ? ' nav-tab-active' : '' );
+	echo '<a href="' . esc_url( $url ) . '" class="' . esc_attr( $cls ) . '">' . esc_html( $label ) . '</a>';
+}
+?>
+</h2>
+
+<div class="reeid-tab-content">
+	<?php
+	switch ( $active_tab ) {
+		case 'tools':
+			reeid_render_tools_tab();
+			break;
+		case 'jobs':
+			reeid_render_jobs_tab();
+			break;
+		case 'faq':
+			reeid_render_faq_tab();
+			break;
+		case 'info':
+			reeid_render_info_tab();
+			break;
+		case 'stat':
+			if ( function_exists( 'reeid_render_stat_tab' ) ) {
+				reeid_render_stat_tab();
+			} else {
+				echo '<p>' . esc_html__( 'Stat tab not available.', 'reeid-translate' ) . '</p>';
+			}
+			break;
+		case 'settings':
+		default:
+			reeid_render_settings_tab();
+			break;
+	}
+	?>
+</div>
+</div>
 <?php
 }
 
 /**
  * Render the “Settings” tab contents.
  */
-function reeid_render_settings_tab()
-{
-    if (! is_admin() || ! current_user_can('manage_options') || ! function_exists('settings_fields')) {
-        echo '<div class="notice notice-error"><p>' . esc_html__('Unauthorized.', 'reeid-translate') . '</p></div>';
-        return;
-    }
-?>
-    <form method="post" action="options.php">
-        <?php
-        settings_fields('reeid_translate_settings');
-        do_settings_sections('reeid-translate-settings');
-        submit_button();
-        ?>
-    </form>
-<?php
+function reeid_render_settings_tab() {
+	if ( ! is_admin() || ! current_user_can( 'manage_options' ) || ! function_exists( 'settings_fields' ) ) {
+		echo '<div class="notice notice-error"><p>' . esc_html__( 'Unauthorized.', 'reeid-translate' ) . '</p></div>';
+		return;
+	}
+	?>
+	<form method="post" action="options.php">
+		<?php
+		settings_fields( 'reeid_translate_settings' );
+		do_settings_sections( 'reeid-translate-settings' );
+		submit_button();
+		?>
+	</form>
+	<?php
 }
 
-function reeid_render_tools_tab()
-{
-    error_log('REEID_TOOLS_HANDLER_ENTERED');
-    error_log( print_r( $_POST, true ) );
+function reeid_render_tools_tab() {
 
-    if (! is_admin() || ! current_user_can('manage_options')) {
-        echo '<div class="notice notice-error"><p>' . esc_html__('Unauthorized.', 'reeid-translate') . '</p></div>';
-        return;
-    }
+	if ( ! is_admin() || ! current_user_can( 'manage_options' ) ) {
+		echo '<div class="notice notice-error"><p>' . esc_html__( 'Unauthorized.', 'reeid-translate' ) . '</p></div>';
+		return;
+	}
 
-    $msg        = '';
-    $map_output = '';
+	$msg        = '';
+	$map_output = '';
+
 
 
     $method     = isset($_SERVER['REQUEST_METHOD']) ? sanitize_text_field(wp_unslash($_SERVER['REQUEST_METHOD'])) : '';

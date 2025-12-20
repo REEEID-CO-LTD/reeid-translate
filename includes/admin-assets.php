@@ -165,65 +165,72 @@ function reeid_enqueue_admin_and_metabox_assets( $hook ) {
    ===================================================== */
 add_action( 'elementor/editor/after_enqueue_scripts', 'reeid_enqueue_elementor_assets' );
 function reeid_enqueue_elementor_assets() {
-    global $reeid_base_path, $reeid_base_url;
+	global $reeid_base_path, $reeid_base_url;
 
-    $el_js = $reeid_base_path . '/assets/js/elementor-translate.js';
-    if ( ! file_exists( $el_js ) ) {
-        return;
-    }
+	$el_js = $reeid_base_path . '/assets/js/elementor-translate.js';
+	if ( ! file_exists( $el_js ) ) {
+		return;
+	}
 
-    wp_enqueue_script(
-        'reeid-elementor-translate',
-        $reeid_base_url . '/assets/js/elementor-translate.js',
-        array( 'jquery' ),
-        time(),
-        true
-    );
+	wp_enqueue_script(
+		'reeid-elementor-translate',
+		$reeid_base_url . '/assets/js/elementor-translate.js',
+		array( 'jquery' ),
+		time(),
+		true
+	);
 
-    $lang_names = function_exists( 'reeid_get_supported_languages' )
-        ? (array) reeid_get_supported_languages()
-        : array();
+	$lang_names = function_exists( 'reeid_get_supported_languages' )
+		? (array) reeid_get_supported_languages()
+		: array();
 
-    $bulk = get_option( 'reeid_bulk_translation_langs', array() );
-    if ( empty( $bulk ) ) {
-        $bulk = get_option( 'reeid_bulk_languages', array() );
-    }
+	$bulk = get_option( 'reeid_bulk_translation_langs', array() );
+	if ( empty( $bulk ) ) {
+		$bulk = get_option( 'reeid_bulk_languages', array() );
+	}
 
-    if ( ! is_array( $bulk ) ) {
-        $bulk = array_filter(
-            array_map( 'sanitize_text_field', explode( ',', (string) $bulk ) )
-        );
-    } else {
-        $bulk = array_map( 'sanitize_text_field', $bulk );
-    }
+	if ( ! is_array( $bulk ) ) {
+		$bulk = array_filter(
+			array_map( 'sanitize_text_field', explode( ',', (string) $bulk ) )
+		);
+	} else {
+		$bulk = array_map( 'sanitize_text_field', $bulk );
+	}
 
-    if ( $lang_names ) {
-        $bulk = array_values(
-            array_intersect( $bulk, array_keys( $lang_names ) )
-        );
-    }
+	if ( $lang_names ) {
+		$bulk = array_values(
+			array_intersect( $bulk, array_keys( $lang_names ) )
+		);
+	}
 
-    $post_id   = isset( $_GET['post'] ) ? absint( $_GET['post'] ) : 0;
-    $post_type = $post_id ? get_post_type( $post_id ) : 'post';
+	/*
+	 * Read-only context: Elementor editor bootstrap.
+	 * No state change, no privileged action → nonce not required.
+	 */
+	// phpcs:ignore WordPress.Security.NonceVerification.Recommended
+	$post_id = isset( $_GET['post'] ) ? absint( wp_unslash( $_GET['post'] ) ) : 0;
 
-    wp_localize_script(
-        'reeid-elementor-translate',
-        'reeidData',
-        array(
-            'ajaxurl'   => esc_url_raw( admin_url( 'admin-ajax.php' ) ),
-            'nonce'     => wp_create_nonce( 'reeid_translate_nonce_action' ),
-            'langNames' => $lang_names,
-            'bulkLangs' => $bulk,
-            'postType'  => $post_type,
-            'listUrls'  => array(
-                'post'    => admin_url( 'edit.php' ),
-                'page'    => admin_url( 'edit.php?post_type=page' ),
-                'product' => admin_url( 'edit.php?post_type=product' ),
-            ),
-            'panelColor' => '#cf616a',
-        )
-    );
+	$post_type = $post_id ? get_post_type( $post_id ) : 'post';
+
+	wp_localize_script(
+		'reeid-elementor-translate',
+		'reeidData',
+		array(
+			'ajaxurl'    => esc_url_raw( admin_url( 'admin-ajax.php' ) ),
+			'nonce'      => wp_create_nonce( 'reeid_translate_nonce_action' ),
+			'langNames'  => $lang_names,
+			'bulkLangs'  => $bulk,
+			'postType'   => $post_type,
+			'listUrls'   => array(
+				'post'    => admin_url( 'edit.php' ),
+				'page'    => admin_url( 'edit.php?post_type=page' ),
+				'product' => admin_url( 'edit.php?post_type=product' ),
+			),
+			'panelColor' => '#cf616a',
+		)
+	);
 }
+
 
 /* =====================================================
    D) Remove old alert helpers

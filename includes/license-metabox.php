@@ -91,130 +91,149 @@ add_action(
 
 function reeid_handle_validate_license_key() {
 
-    $in = filter_input_array(
-        INPUT_POST,
-        array(
-            'nonce' => FILTER_UNSAFE_RAW,
-            'key'   => FILTER_UNSAFE_RAW,
-        )
-    );
-    $in = is_array( $in ) ? $in : array();
+	$in = filter_input_array(
+		INPUT_POST,
+		array(
+			'nonce' => FILTER_UNSAFE_RAW,
+			'key'   => FILTER_UNSAFE_RAW,
+		)
+	);
+	$in = is_array( $in ) ? $in : array();
 
-    $nonce = isset( $in['nonce'] ) ? $in['nonce'] : (
-        $_REQUEST['nonce'] ?? $_POST['nonce'] ?? $_GET['nonce'] ?? ''
-    );
+	// Resolve nonce safely from POST first, then fallbacks
+	if ( isset( $in['nonce'] ) && $in['nonce'] !== '' ) {
+		$nonce = sanitize_text_field( wp_unslash( $in['nonce'] ) );
+	} elseif ( isset( $_REQUEST['nonce'] ) ) {
+		$nonce = sanitize_text_field( wp_unslash( $_REQUEST['nonce'] ) );
+	} elseif ( isset( $_POST['nonce'] ) ) {
+		$nonce = sanitize_text_field( wp_unslash( $_POST['nonce'] ) );
+	} elseif ( isset( $_GET['nonce'] ) ) {
+		$nonce = sanitize_text_field( wp_unslash( $_GET['nonce'] ) );
+	} else {
+		$nonce = '';
+	}
 
-    $ok_nonce = false;
-    if ( ! empty( $nonce ) ) {
-        if ( wp_verify_nonce( $nonce, 'reeid_translate_nonce' ) ) {
-            $ok_nonce = true;
-        } elseif ( wp_verify_nonce( $nonce, 'reeid_translate_nonce_action' ) ) {
-            $ok_nonce = true;
-        }
-    }
+	$ok_nonce = false;
+	if ( $nonce !== '' ) {
+		if ( wp_verify_nonce( $nonce, 'reeid_translate_nonce' ) ) {
+			$ok_nonce = true;
+		} elseif ( wp_verify_nonce( $nonce, 'reeid_translate_nonce_action' ) ) {
+			$ok_nonce = true;
+		}
+	}
 
-    if ( ! $ok_nonce ) {
-        wp_send_json_error(
-            array(
-                'valid'   => false,
-                'message' => __( 'Invalid or missing security token. Please reload the page and try again.', 'reeid-translate' ),
-            )
-        );
-    }
+	if ( ! $ok_nonce ) {
+		wp_send_json_error(
+			array(
+				'valid'   => false,
+				'message' => __( 'Invalid or missing security token. Please reload the page and try again.', 'reeid-translate' ),
+			)
+		);
+	}
 
-    $key_raw = isset( $in['key'] ) ? wp_unslash( $in['key'] ) : '';
-    $key     = sanitize_text_field( trim( (string) $key_raw ) );
+	$key_raw = isset( $in['key'] ) ? wp_unslash( $in['key'] ) : '';
+	$key     = sanitize_text_field( trim( (string) $key_raw ) );
 
-    if ( '' === $key ) {
-        wp_send_json_success(
-            array(
-                'valid'   => false,
-                'message' => __( 'Please enter a license key.', 'reeid-translate' ),
-            )
-        );
-    }
+	if ( '' === $key ) {
+		wp_send_json_success(
+			array(
+				'valid'   => false,
+				'message' => __( 'Please enter a license key.', 'reeid-translate' ),
+			)
+		);
+	}
 
-    $domain = reeid9_site_host();
+	$domain = reeid9_site_host();
 
-    $resp = wp_remote_post(
-        'https://go.reeid.com/validate-license.php',
-        array(
-            'timeout' => 15,
-            'body'    => array(
-                'license_key' => $key,
-                'domains'     => $domain,
-            ),
-        )
-    );
+	$resp = wp_remote_post(
+		'https://go.reeid.com/validate-license.php',
+		array(
+			'timeout' => 15,
+			'body'    => array(
+				'license_key' => $key,
+				'domains'     => $domain,
+			),
+		)
+	);
 
-    if ( is_wp_error( $resp ) ) {
-        wp_send_json_error(
-            array(
-                'valid'   => false,
-                /* translators: %s = WP_Error message */
-                'message' => sprintf( __( 'Could not connect to license server: %s', 'reeid-translate' ), $resp->get_error_message() ),
-            )
-        );
-    }
+	if ( is_wp_error( $resp ) ) {
+	wp_send_json_error(
+		array(
+			'valid' => false,
+			'message' => sprintf(
+				// translators: %s is the WP_Error message returned when the license server cannot be reached.
+				__( 'Could not connect to license server: %s', 'reeid-translate' ),
+				$resp->get_error_message()
+			),
+		)
+	);
+}
 
-    $code = (int) wp_remote_retrieve_response_code( $resp );
-    $body = (string) wp_remote_retrieve_body( $resp );
 
-    update_option( 'reeid_license_last_code', $code );
-    update_option( 'reeid_license_last_raw', substr( $body, 0, 800 ) );
+	$code = (int) wp_remote_retrieve_response_code( $resp );
+	$body = (string) wp_remote_retrieve_body( $resp );
 
-    $valid   = false;
-    $message = '';
+	update_option( 'reeid_license_last_code', $code );
+	update_option( 'reeid_license_last_raw', substr( $body, 0, 800 ) );
 
-    if ( 200 === $code && '' !== $body ) {
+	$valid   = false;
+	$message = '';
 
-        $data = json_decode( $body, true );
-        if ( is_array( $data ) ) {
-            $valid   = isset( $data['valid'] ) ? reeid9_bool( $data['valid'] ) : false;
-            $message = isset( $data['message'] ) ? (string) $data['message'] : '';
-            update_option( 'reeid_license_last_msg', $message );
-        } else {
-            // translators: shown when license server returns non-JSON
-            $message = __( 'Non-JSON response from license server.', 'reeid-translate' );
-        }
+	if ( 200 === $code && '' !== $body ) {
 
-    } else {
-        // translators: %1$d = HTTP code
-        $message = sprintf( __( 'HTTP %1$d empty or invalid response.', 'reeid-translate' ), $code );
-    }
+		$data = json_decode( $body, true );
+		if ( is_array( $data ) ) {
+			$valid   = isset( $data['valid'] ) ? reeid9_bool( $data['valid'] ) : false;
+			$message = isset( $data['message'] ) ? (string) $data['message'] : '';
+			update_option( 'reeid_license_last_msg', $message );
+		} else {
+			// translators: shown when the license server responds with non-JSON output.
+			$message = __( 'Non-JSON response from license server.', 'reeid-translate' );
+		}
 
-    $saved_key = trim( (string) get_option( 'reeid_pro_license_key', '' ) );
-    if ( '' !== $saved_key && $saved_key === $key ) {
-        update_option( 'reeid_license_status', $valid ? 'valid' : 'invalid' );
-        update_option( 'reeid_license_checked_at', time() );
-    }
+	} else {
+		
+		$message = sprintf(
+            // translators: %1$d is the HTTP response code returned by the license server.
+			__( 'HTTP %1$d empty or invalid response.', 'reeid-translate' ),
+			$code
+		);
+	}
 
-    if ( $valid ) {
-        if ( '' !== $saved_key && $saved_key !== $key ) {
-            if ( '' === $message ) {
-                $message = __( 'License key is valid.', 'reeid-translate' );
-            }
-            $message .= ' ' . __( 'Click “Save Changes” to store this key.', 'reeid-translate' );
-        } else {
-            if ( '' === $message ) {
-                $message = __( 'License key is valid for this domain.', 'reeid-translate' );
-            }
-        }
-    } else {
-        if ( '' === $message ) {
-            $message = __( 'License key is invalid or not active.', 'reeid-translate' );
-        }
-    }
+	$saved_key = trim( (string) get_option( 'reeid_pro_license_key', '' ) );
+	if ( '' !== $saved_key && $saved_key === $key ) {
+		update_option( 'reeid_license_status', $valid ? 'valid' : 'invalid' );
+		update_option( 'reeid_license_checked_at', time() );
+	}
 
-    wp_send_json_success(
-        array(
-            'valid'   => $valid,
-            'message' => $message,
-        )
-    );
+	if ( $valid ) {
+		if ( '' !== $saved_key && $saved_key !== $key ) {
+			if ( '' === $message ) {
+				$message = __( 'License key is valid.', 'reeid-translate' );
+			}
+			$message .= ' ' . __( 'Click “Save Changes” to store this key.', 'reeid-translate' );
+		} else {
+			if ( '' === $message ) {
+				$message = __( 'License key is valid for this domain.', 'reeid-translate' );
+			}
+		}
+	} else {
+		if ( '' === $message ) {
+			$message = __( 'License key is invalid or not active.', 'reeid-translate' );
+		}
+	}
+
+	wp_send_json_success(
+		array(
+			'valid'   => $valid,
+			'message' => $message,
+		)
+	);
 }
 
 add_action( 'wp_ajax_reeid_validate_license_key', 'reeid_handle_validate_license_key' );
+
+
 
 /*------------------------------------------------------------------------------
   4) CANONICAL LICENSE VALIDATOR

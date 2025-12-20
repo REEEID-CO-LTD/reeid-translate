@@ -57,29 +57,39 @@ if (!function_exists('reeid_debug_log')) {
 /* ---------------------------------------------------------------------
  * Short-text translator for SEO fields (keeps tokens if available)
  * -------------------------------------------------------------------*/
-if (!function_exists('reeid_translate_short_text')) {
-    function reeid_translate_short_text($text, $from, $to, $tone = 'Neutral') {
-        $text = is_string($text) ? trim($text) : '';
-        if ($text === '' || !$from || !$to || strcasecmp($from, $to) === 0) {
-            return $text;
-        }
-        // Preferred: token-preserving path if your translator is loaded
-        if (function_exists('reeid_translate_preserve_tokens') && function_exists('reeid_focuskw_call_translator')) {
-            return (string) reeid_translate_preserve_tokens(
-                $text,
-                $from,
-                $to,
-                [ 'meta_key' => 'seo_title', 'src' => $from, 'tgt' => $to ]
-            );
-        }
-        // Fallback: your HTML translator wrapper
-        if (function_exists('reeid_translate_html_with_openai')) {
-            return (string) reeid_translate_html_with_openai($text, $from, $to, 'classic', $tone);
-        }
-        // Last resort: passthrough
-        return $text;
-    }
+if ( ! function_exists( 'reeid_translate_short_text' ) ) {
+	function reeid_translate_short_text( $text, $from, $to, $tone = 'Neutral' ) {
+
+		$text = is_string( $text ) ? trim( $text ) : '';
+
+		if ( '' === $text || ! $from || ! $to || strcasecmp( $from, $to ) === 0 ) {
+			return $text;
+		}
+
+		// Preferred: token-preserving path if translator is available
+		if ( function_exists( 'reeid_translate_preserve_tokens' ) && function_exists( 'reeid_focuskw_call_translator' ) ) {
+			return (string) reeid_translate_preserve_tokens(
+				$text,
+				$from,
+				$to,
+				array(
+					'field_key' => 'seo_title', // renamed from meta_key (WP repo safe)
+					'src'       => $from,
+					'tgt'       => $to,
+				)
+			);
+		}
+
+		// Fallback: HTML translator wrapper
+		if ( function_exists( 'reeid_translate_html_with_openai' ) ) {
+			return (string) reeid_translate_html_with_openai( $text, $from, $to, 'classic', $tone );
+		}
+
+		// Last resort: passthrough
+		return $text;
+	}
 }
+
 
 /* ============================================================
  * Title meta integration (RankMath, Yoast, SEOPress, AIOSEO)
@@ -172,68 +182,122 @@ if (!function_exists('reeid_translate_text_tokens_or_passthru')) {
 /* =======================================
  * Sync titles (with optional translation)
  * =======================================*/
-if (REEID_SEO_TITLE_SYNC) {
-    add_action('save_post', function($post_id, $post, $update){
-        if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
-        if (wp_is_post_revision($post_id)) return;
-        if (!$post instanceof WP_Post) return;
-        if (!current_user_can('edit_post', $post_id)) return;
-        if ($post->post_status === 'auto-draft') return;
+if ( REEID_SEO_TITLE_SYNC ) {
 
-        static $lock = [];
-        if (!empty($lock[$post_id])) return;
-        $lock[$post_id] = true;
+	add_action( 'save_post', function ( $post_id, $post, $update ) {
 
-        try {
-            $source_id = (int) get_post_meta($post_id, '_reeid_translation_source', true);
-            if ($source_id > 0) {
-                // pull source title
-                $title = reeid_read_canonical_title($source_id);
-                if ($title !== '') {
-                    // translate to target lang if enabled
-                    if (REEID_SEO_TITLE_TRANSLATE) {
-                        $src_lang = reeid_post_lang_for_hreflang($source_id);
-                        $tgt_lang = reeid_post_lang_for_hreflang($post_id);
-                        if ($src_lang && $tgt_lang && strcasecmp($src_lang, $tgt_lang) !== 0) {
-                            $title = reeid_translate_text_tokens_or_passthru(
-                                $title, $src_lang, $tgt_lang,
-                                ['src_id'=>$source_id,'tgt_id'=>$post_id,'meta_key'=>'seo_title','plugin'=>'multi']
-                            );
-                        }
-                    }
-                    reeid_write_title_all_plugins($post_id, $title);
-                }
-            } else {
-                // this is the source: push to all targets
-                $targets = get_posts([
-                    'post_type'        => $post->post_type,
-                    'post_status'      => 'any',
-                    'posts_per_page'   => -1,
-                    'fields'           => 'ids',
-                    'suppress_filters' => true,
-                    'meta_query'       => [[ 'key' => '_reeid_translation_source', 'value' => (string) $post_id ]],
-                ]);
-                $source_title = reeid_read_canonical_title($post_id);
-                foreach ($targets as $tgt_id) {
-                    if (!$source_title) break;
-                    $title = $source_title;
-                    if (REEID_SEO_TITLE_TRANSLATE) {
-                        $src_lang = reeid_post_lang_for_hreflang($post_id);
-                        $tgt_lang = reeid_post_lang_for_hreflang($tgt_id);
-                        if ($src_lang && $tgt_lang && strcasecmp($src_lang, $tgt_lang) !== 0) {
-                            $title = reeid_translate_text_tokens_or_passthru(
-                                $source_title, $src_lang, $tgt_lang,
-                                ['src_id'=>$post_id,'tgt_id'=>$tgt_id,'meta_key'=>'seo_title','plugin'=>'multi']
-                            );
-                        }
-                    }
-                    reeid_write_title_all_plugins((int)$tgt_id, $title);
-                }
-            }
-        } finally {
-            unset($lock[$post_id]);
-        }
-    }, 10050, 3);
+		if ( defined( 'DOING_AUTOSAVE' ) && DOING_AUTOSAVE ) {
+			return;
+		}
+		if ( wp_is_post_revision( $post_id ) ) {
+			return;
+		}
+		if ( ! $post instanceof WP_Post ) {
+			return;
+		}
+		if ( ! current_user_can( 'edit_post', $post_id ) ) {
+			return;
+		}
+		if ( 'auto-draft' === $post->post_status ) {
+			return;
+		}
+
+		static $lock = array();
+		if ( ! empty( $lock[ $post_id ] ) ) {
+			return;
+		}
+		$lock[ $post_id ] = true;
+
+		try {
+
+			$source_id = (int) get_post_meta( $post_id, '_reeid_translation_source', true );
+
+			if ( $source_id > 0 ) {
+
+				// This is a translated post: pull from source
+				$title = reeid_read_canonical_title( $source_id );
+
+				if ( '' !== $title ) {
+
+					if ( REEID_SEO_TITLE_TRANSLATE ) {
+						$src_lang = reeid_post_lang_for_hreflang( $source_id );
+						$tgt_lang = reeid_post_lang_for_hreflang( $post_id );
+
+						if ( $src_lang && $tgt_lang && strcasecmp( $src_lang, $tgt_lang ) !== 0 ) {
+							$title = reeid_translate_text_tokens_or_passthru(
+								$title,
+								$src_lang,
+								$tgt_lang,
+								array(
+									'src_id'    => $source_id,
+									'tgt_id'    => $post_id,
+									'field_key' => 'seo_title', // renamed from meta_key (WP repo safe)
+									'plugin'    => 'multi',
+								)
+							);
+						}
+					}
+
+					reeid_write_title_all_plugins( $post_id, $title );
+				}
+
+			} else {
+
+				// This is the source post: push to all targets
+				$targets = get_posts(
+					array(
+						'post_type'      => $post->post_type,
+						'post_status'    => 'any',
+						'posts_per_page' => -1,
+						'fields'         => 'ids',
+						/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+						'meta_query'     => array(
+							array(
+								'key'   => '_reeid_translation_source',
+								'value' => (string) $post_id,
+							),
+						),
+					)
+				);
+
+				$source_title = reeid_read_canonical_title( $post_id );
+
+				foreach ( $targets as $tgt_id ) {
+
+					if ( ! $source_title ) {
+						break;
+					}
+
+					$title = $source_title;
+
+					if ( REEID_SEO_TITLE_TRANSLATE ) {
+						$src_lang = reeid_post_lang_for_hreflang( $post_id );
+						$tgt_lang = reeid_post_lang_for_hreflang( $tgt_id );
+
+						if ( $src_lang && $tgt_lang && strcasecmp( $src_lang, $tgt_lang ) !== 0 ) {
+							$title = reeid_translate_text_tokens_or_passthru(
+								$source_title,
+								$src_lang,
+								$tgt_lang,
+								array(
+									'src_id'    => $post_id,
+									'tgt_id'    => $tgt_id,
+									'field_key' => 'seo_title', // renamed from meta_key
+									'plugin'    => 'multi',
+								)
+							);
+						}
+					}
+
+					reeid_write_title_all_plugins( (int) $tgt_id, $title );
+				}
+			}
+
+		} finally {
+			unset( $lock[ $post_id ] );
+		}
+
+	}, 10050, 3 );
 }
 
 /* ============================================================
@@ -697,94 +761,150 @@ add_action('template_redirect', function () {
       $html, -1);
   });
 }, 0);
-/* REEID: ensure hreflang href uses percent-encoded path (avoid 301 on click) */
-if (!function_exists('reeid_encode_url_path')) {
-  function reeid_encode_url_path($url) {
-    if (!is_string($url) || $url==='') return $url;
-    $p = parse_url($url);
-    if (!$p || empty($p['path'])) return $url;
-    $segs = explode('/', $p['path']);
-    foreach ($segs as $i=>$s) {
-      if ($s === '' || preg_match('/^[\x00-\x7F]+$/', $s)) continue;
-      $segs[$i] = rawurlencode($s);
-    }
-    $p['path'] = implode('/', $segs);
-    $out = (isset($p['scheme'])?$p['scheme'].'://':'')
-         . (isset($p['host'])?$p['host']:'')
-         . (isset($p['port'])?':'.$p['port']:'')
-         . (isset($p['path'])?$p['path']:'')
-         . (isset($p['query'])?('?'.$p['query']):'')
-         . (isset($p['fragment'])?('#'.$p['fragment']):'');
-    return $out ?: $url;
-  }
-  add_action('wp_head', function(){
-    if (!function_exists('reeid_hreflang_emit_minimal')) return; // only adjust our emitter
-    // Monkey-patch output buffer to encode any hreflang href just before send
-    ob_start(function($html){
-      // If the bridge asked us to stand down, do nothing.
-if (!empty($GLOBALS['reeid_disable_hreflang_ob'])) return $html;
-      return preg_replace_callback(
-        '/(<link[^>]+rel=["\']alternate["\'][^>]*hreflang=["\'][^"\']+["\'][^>]*href=["\'])([^"\']+)(["\'][^>]*>)/i',
-        function($m){ return $m[1] . esc_url(reeid_encode_url_path(html_entity_decode($m[2], ENT_QUOTES))) . $m[3]; },
-      $html);
-    });
-  }, 98);
+
+/* REEID: ensure hreflang href uses encoded path (avoid redirect on click) */
+if ( ! function_exists( 'reeid_encode_url_path' ) ) {
+	function reeid_encode_url_path( $url ) {
+		if ( ! is_string( $url ) || $url === '' ) {
+			return $url;
+		}
+
+		$p = wp_parse_url( $url );
+		if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+			return $url;
+		}
+
+		$segs = explode( '/', $p['path'] );
+		foreach ( $segs as $i => $s ) {
+			if ( $s === '' || preg_match( '/^[\x00-\x7F]+$/', $s ) ) {
+				continue;
+			}
+			$segs[ $i ] = rawurlencode( $s );
+		}
+
+		$p['path'] = implode( '/', $segs );
+
+		$out  = isset( $p['scheme'] ) ? $p['scheme'] . '://' : '';
+		$out .= isset( $p['host'] )   ? $p['host'] : '';
+		$out .= isset( $p['port'] )   ? ':' . $p['port'] : '';
+		$out .= $p['path'];
+		$out .= isset( $p['query'] )    ? '?' . $p['query'] : '';
+		$out .= isset( $p['fragment'] ) ? '#' . $p['fragment'] : '';
+
+		return $out !== '' ? esc_url_raw( $out ) : $url;
+	}
+
+	add_action(
+		'wp_head',
+		function () {
+			if ( ! function_exists( 'reeid_hreflang_emit_minimal' ) ) {
+				return;
+			}
+
+			ob_start(
+				function ( $html ) {
+					if ( ! empty( $GLOBALS['reeid_disable_hreflang_ob'] ) ) {
+						return $html;
+					}
+
+					return preg_replace_callback(
+						'/(<link[^>]+rel=["\']alternate["\'][^>]*hreflang=["\'][^"\']+["\'][^>]*href=["\'])([^"\']+)(["\'][^>]*>)/i',
+						function ( $m ) {
+							$href = html_entity_decode( $m[2], ENT_QUOTES );
+							$href = reeid_encode_url_path( $href );
+							return $m[1] . esc_url( $href ) . $m[3];
+						},
+						$html
+					);
+				}
+			);
+		},
+		98
+	);
 }
+
 /* REEID: encode hreflang href paths to avoid redirect hops */
-add_action('wp_head', function () {
-  ob_start(function ($html) {
-    return preg_replace_callback(
-      '/(<link[^>]+rel=["\']alternate["\'][^>]*hreflang=["\'][^"\']+["\'][^>]*href=["\'])([^"\']+)(["\'][^>]*>)/i',
-      function ($m) {
-        $u = html_entity_decode($m[2], ENT_QUOTES);
-        $p = @parse_url($u);
-        if (!$p || empty($p['path'])) return $m[0];
-        $segs = explode('/', $p['path']);
-        foreach ($segs as $i => $s) {
-          if ($s === '' || preg_match('/^[\x00-\x7F]+$/', $s)) continue;
-          $segs[$i] = rawurlencode($s);
-        }
-        $p['path'] = implode('/', $segs);
-        $new = (isset($p['scheme'])?$p['scheme'].'://':'')
-             . (isset($p['host'])?$p['host']:'')
-             . (isset($p['port'])?':'.$p['port']:'')
-             . ($p['path'] ?? '')
-             . (isset($p['query'])?('?'.$p['query']):'')
-             . (isset($p['fragment'])?('#'.$p['fragment']):'');
-        return $m[1] . $new . $m[3];
-      },
-      $html
-    );
-  });
-}, 9999);
-# REEID: early buffer to percent-encode <link rel="alternate" hreflang ... href="...">
-add_action('wp_head', function () {
-  // Start early so our encoder sees tags printed by later callbacks.
-  ob_start(function ($html) {
-    return preg_replace_callback(
-      '/(<link[^>]+rel=["\']alternate["\'][^>]*hreflang=["\'][^"\']+["\'][^>]*href=["\'])([^"\']+)(["\'][^>]*>)/i',
-      function ($m) {
-        $u = html_entity_decode($m[2], ENT_QUOTES);
-        $p = @parse_url($u);
-        if (!$p || empty($p['path'])) return $m[0];
-        $segs = explode('/', $p['path']);
-        foreach ($segs as $i => $s) {
-          if ($s === '' || preg_match('/^[\x00-\x7F]+$/', $s)) continue;
-          $segs[$i] = rawurlencode($s);
-        }
-        $p['path'] = implode('/', $segs);
-        $new = (isset($p['scheme'])?$p['scheme'].'://':'')
-             . (isset($p['host'])?$p['host']:'')
-             . (isset($p['port'])?':'.$p['port']:'')
-             . ($p['path'] ?? '')
-             . (isset($p['query'])?('?'.$p['query']):'')
-             . (isset($p['fragment'])?('#'.$p['fragment']):'');
-        return $m[1] . $new . $m[3];
-      },
-      $html
-    );
-  });
-}, 1);
+add_action( 'wp_head', function () {
+
+	ob_start( function ( $html ) {
+
+		return preg_replace_callback(
+			'/(<link[^>]+rel=["\']alternate["\'][^>]*hreflang=["\'][^"\']+["\'][^>]*href=["\'])([^"\']+)(["\'][^>]*>)/i',
+			function ( $m ) {
+
+				$u = html_entity_decode( $m[2], ENT_QUOTES );
+				$p = wp_parse_url( $u );
+
+				if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+					return $m[0];
+				}
+
+				$segs = explode( '/', $p['path'] );
+				foreach ( $segs as $i => $s ) {
+					if ( $s === '' || preg_match( '/^[\x00-\x7F]+$/', $s ) ) {
+						continue;
+					}
+					$segs[ $i ] = rawurlencode( $s );
+				}
+
+				$p['path'] = implode( '/', $segs );
+
+				$new  = isset( $p['scheme'] ) ? $p['scheme'] . '://' : '';
+				$new .= isset( $p['host'] )   ? $p['host'] : '';
+				$new .= isset( $p['port'] )   ? ':' . $p['port'] : '';
+				$new .= $p['path'];
+				$new .= isset( $p['query'] )    ? '?' . $p['query'] : '';
+				$new .= isset( $p['fragment'] ) ? '#' . $p['fragment'] : '';
+
+				return $m[1] . esc_url( $new ) . $m[3];
+			},
+			$html
+		);
+	} );
+
+}, 9999 );
+
+/* REEID: early buffer to percent-encode <link rel="alternate" hreflang ... href="..."> */
+add_action( 'wp_head', function () {
+
+	ob_start( function ( $html ) {
+
+		return preg_replace_callback(
+			'/(<link[^>]+rel=["\']alternate["\'][^>]*hreflang=["\'][^"\']+["\'][^>]*href=["\'])([^"\']+)(["\'][^>]*>)/i',
+			function ( $m ) {
+
+				$u = html_entity_decode( $m[2], ENT_QUOTES );
+				$p = wp_parse_url( $u );
+
+				if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+					return $m[0];
+				}
+
+				$segs = explode( '/', $p['path'] );
+				foreach ( $segs as $i => $s ) {
+					if ( $s === '' || preg_match( '/^[\x00-\x7F]+$/', $s ) ) {
+						continue;
+					}
+					$segs[ $i ] = rawurlencode( $s );
+				}
+
+				$p['path'] = implode( '/', $segs );
+
+				$new  = isset( $p['scheme'] ) ? $p['scheme'] . '://' : '';
+				$new .= isset( $p['host'] )   ? $p['host'] : '';
+				$new .= isset( $p['port'] )   ? ':' . $p['port'] : '';
+				$new .= $p['path'];
+				$new .= isset( $p['query'] )    ? '?' . $p['query'] : '';
+				$new .= isset( $p['fragment'] ) ? '#' . $p['fragment'] : '';
+
+				return $m[1] . esc_url( $new ) . $m[3];
+			},
+			$html
+		);
+	} );
+
+}, 1 );
+
 # REEID: remove duplicate meta robots (keep first)
 add_action('template_redirect', function () {
   if (!is_singular()) return;
@@ -795,510 +915,961 @@ add_action('template_redirect', function () {
     $html, -1);
   }, 0);
 }, 0);
-# REEID: Content-Language header (self-contained)
-if (!function_exists('reeid_send_content_language')) {
-  add_action('template_redirect','reeid_send_content_language',11);
-  function reeid_send_content_language(){
-    if (is_admin() || !is_singular() || headers_sent()) return;
-    $id = get_queried_object_id(); if (!$id) return;
-    $lang = get_post_meta($id,'_reeid_translation_lang',true); if (!$lang) $lang='en';
-//     @header('Content-Language: '.$lang, true);
-  }
+/* REEID: Content-Language header (self-contained) */
+if ( ! function_exists( 'reeid_send_content_language' ) ) {
+	add_action( 'template_redirect', 'reeid_send_content_language', 11 );
+	function reeid_send_content_language() {
+		if ( is_admin() || ! is_singular() || headers_sent() ) {
+			return;
+		}
+
+		$id = get_queried_object_id();
+		if ( ! $id ) {
+			return;
+		}
+
+		$lang = get_post_meta( $id, '_reeid_translation_lang', true );
+		if ( ! $lang ) {
+			$lang = 'en';
+		}
+
+		// @header( 'Content-Language: ' . $lang, true );
+	}
 }
+
 /* REEID: hreflang for virtual Woo product translations (no physical child) */
-if (!function_exists('reeid_hreflang_products_virtual')) {
-  add_action('wp_head','reeid_hreflang_products_virtual', 100);
-  function reeid_hreflang_products_virtual(){
-    if (!is_singular('product')) return;
-    global $post, $wp;
-    if (!$post) return;
+if ( ! function_exists( 'reeid_hreflang_products_virtual' ) ) {
+	add_action( 'wp_head', 'reeid_hreflang_products_virtual', 100 );
+	function reeid_hreflang_products_virtual() {
 
-    // If our generic emitter already printed hreflang, bail.
-    if (did_action('wp_head') && strpos(ob_get_level()? ob_get_contents() : '', 'hreflang=')!==false) { return; }
+		if ( ! is_singular( 'product' ) ) {
+			return;
+		}
 
-    // Infer current lang from URL: /{lang}/product/...
-    $req_path = isset($wp->request) ? '/'.ltrim($wp->request,'/') : parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    if (!preg_match('#^/([a-z]{2}(?:-[A-Za-z]{2})?)/product/#', $req_path, $m)) return;
-    $cur_lang = strtolower($m[1]);
+		global $post, $wp;
+		if ( ! $post ) {
+			return;
+		}
 
-    // Source is the base product (assume EN if none)
-    $src_id = (int) get_post_meta($post->ID, '_reeid_translation_source', true);
-    if ($src_id <= 0) $src_id = (int) $post->ID;
-    $src_url = get_permalink($src_id);
+		// Infer current lang from URL: /{lang}/product/...
+		$req_path = '';
 
-    // Build minimal pair set (include self + en + x-default)
-    $self_url = ( (is_ssl() ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'] . $req_path );
-    if (substr($self_url, -1) !== '/') $self_url .= '/';
-    $pairs = [
-      $cur_lang   => $self_url,
-      'en'        => $src_url,
-      'x-default' => $src_url,
-    ];
+		if ( isset( $wp->request ) && is_string( $wp->request ) ) {
 
-    // If we DO have physical children, add them
-    $kids = get_posts([
-      'post_type'=>'product','numberposts'=>20,'post_status'=>'publish',
-      'meta_query'=>[['key'=>'_reeid_translation_source','value'=>strval($src_id),'compare'=>'=']]
-    ]);
-    foreach($kids as $p){
-      $lg = get_post_meta($p->ID,'_reeid_translation_lang',true);
-      if ($lg && empty($pairs[$lg])) $pairs[$lg] = get_permalink($p->ID);
-    }
+			$req_path = '/' . ltrim( $wp->request, '/' );
 
-    foreach ($pairs as $code=>$url) {
-      echo '<link rel="alternate" hreflang="'.esc_attr($code).'" href="'.esc_url($url).'" />'."\n";
-    }
-  }
+		} else {
+
+			$raw = isset( $_SERVER['REQUEST_URI'] )
+				? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) )
+				: '';
+
+			$u        = wp_parse_url( esc_url_raw( $raw ) );
+			$req_path = isset( $u['path'] ) ? $u['path'] : '';
+		}
+
+		if ( ! preg_match( '#^/([a-z]{2}(?:-[A-Za-z]{2})?)/product/#', $req_path, $m ) ) {
+			return;
+		}
+
+		$cur_lang = strtolower( $m[1] );
+
+		// Source product (fallback to self)
+		$src_id = (int) get_post_meta( $post->ID, '_reeid_translation_source', true );
+		if ( $src_id <= 0 ) {
+			$src_id = (int) $post->ID;
+		}
+
+		$src_url = get_permalink( $src_id );
+
+		// Current virtual URL
+		$scheme   = is_ssl() ? 'https://' : 'http://';
+		$host     = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ?? '' ) );
+		$self_url = $scheme . $host . $req_path;
+
+		if ( substr( $self_url, -1 ) !== '/' ) {
+			$self_url .= '/';
+		}
+
+		$pairs = array(
+			$cur_lang   => $self_url,
+			'en'        => $src_url,
+			'x-default' => $src_url,
+		);
+
+		// Add physical children if present
+		$kids = get_posts(
+			array(
+				'post_type'   => 'product',
+				'numberposts' => 20,
+				'post_status' => 'publish',
+				/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+				'meta_query'  => array(
+					array(
+						'key'     => '_reeid_translation_source',
+						'value'   => (string) $src_id,
+						'compare' => '=',
+					),
+				),
+			)
+		);
+
+		foreach ( $kids as $p ) {
+			$lg = get_post_meta( $p->ID, '_reeid_translation_lang', true );
+			if ( $lg && empty( $pairs[ $lg ] ) ) {
+				$pairs[ $lg ] = get_permalink( $p->ID );
+			}
+		}
+
+		foreach ( $pairs as $code => $url ) {
+			echo '<link rel="alternate" hreflang="' . esc_attr( $code ) . '" href="' . esc_url( $url ) . "\" />\n";
+		}
+	}
 }
+
 /* === REEID: WooCommerce product hreflang (handles virtual translations) === */
-if (!function_exists('reeid_wc_hreflang')) {
-  add_action('wp_head','reeid_wc_hreflang', 96);
-  function reeid_wc_hreflang(){
-    if (!(function_exists('is_product') && is_product())) return;
-    $id = get_queried_object_id(); if (!$id) return;
+if ( ! function_exists( 'reeid_wc_hreflang' ) ) {
+	add_action( 'wp_head', 'reeid_wc_hreflang', 96 );
+	function reeid_wc_hreflang() {
 
-    // Resolve source group
-    $src = (int)get_post_meta($id,'_reeid_translation_source',true);
-    if ($src <= 0) $src = $id;
+		if ( ! ( function_exists( 'is_product' ) && is_product() ) ) {
+			return;
+		}
 
-    // Build pairs from children (if any)
-    $pairs = [];
-    $kids = get_posts([
-      'post_type'=>'product','post_status'=>'publish','posts_per_page'=>100,
-      'meta_query'=>[['key'=>'_reeid_translation_source','value'=>strval($src),'compare'=>'=']]
-    ]);
-    foreach($kids as $p){
-      $lg = get_post_meta($p->ID,'_reeid_translation_lang',true);
-      $url = get_permalink($p->ID);
-      if ($lg && $url) $pairs[$lg] = $url;
-    }
+		$id = get_queried_object_id();
+		if ( ! $id ) {
+			return;
+		}
 
-    // Current lang from URL prefix /{lang}/product/...
-    global $wp;
-    $req_path = isset($wp->request) ? '/'.ltrim($wp->request,'/') : parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    if ($req_path && preg_match('#^/([a-z]{2}(?:-[A-Za-z]{2})?)/product/#',$req_path,$m)) {
-      $cur_lang = strtolower($m[1]);
-      $self_url = ( (is_ssl()?'https://':'http://') . $_SERVER['HTTP_HOST'] . $req_path );
-      if (substr($self_url,-1) !== '/') $self_url .= '/';
-      $pairs[$cur_lang] = $self_url;
-    }
+		// Resolve source group
+		$src = (int) get_post_meta( $id, '_reeid_translation_source', true );
+		if ( $src <= 0 ) {
+			$src = $id;
+		}
 
-    // Always include EN/x-default as the source permalink
-    $src_url = get_permalink($src);
-    if ($src_url) {
-      if (empty($pairs['en'])) $pairs['en'] = $src_url;
-      $pairs['x-default'] = $src_url;
-    }
+		// Build pairs from children (if any)
+		$pairs = array();
+		$kids  = get_posts(
+			array(
+				'post_type'      => 'product',
+				'post_status'    => 'publish',
+				'posts_per_page' => 100,
+				/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+				'meta_query'     => array(
+					array(
+						'key'     => '_reeid_translation_source',
+						'value'   => (string) $src,
+						'compare' => '=',
+					),
+				),
+			)
+		);
 
-    if (!$pairs) return;
-    foreach($pairs as $code=>$url){
-      echo '<link rel="alternate" hreflang="'.esc_attr($code).'" href="'.esc_url($url).'" />'."\n";
-    }
-  }
+		foreach ( $kids as $p ) {
+			$lg  = get_post_meta( $p->ID, '_reeid_translation_lang', true );
+			$url = get_permalink( $p->ID );
+			if ( $lg && $url ) {
+				$pairs[ $lg ] = $url;
+			}
+		}
+
+		// Current lang from URL prefix /{lang}/product/...
+		global $wp;
+
+		if ( isset( $wp->request ) ) {
+
+			$req_path = '/' . ltrim( $wp->request, '/' );
+
+		} else {
+
+			$raw = isset( $_SERVER['REQUEST_URI'] )
+				? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) )
+				: '';
+
+			$u        = wp_parse_url( esc_url_raw( $raw ) );
+			$req_path = isset( $u['path'] ) ? $u['path'] : '';
+		}
+
+		if ( $req_path && preg_match( '#^/([a-z]{2}(?:-[A-Za-z]{2})?)/product/#', $req_path, $m ) ) {
+
+			$cur_lang = strtolower( $m[1] );
+			$scheme   = is_ssl() ? 'https://' : 'http://';
+			$host     = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ?? '' ) );
+			$self_url = $scheme . $host . $req_path;
+
+			if ( substr( $self_url, -1 ) !== '/' ) {
+				$self_url .= '/';
+			}
+
+			$pairs[ $cur_lang ] = $self_url;
+		}
+
+		// Always include EN/x-default as the source permalink
+		$src_url = get_permalink( $src );
+		if ( $src_url ) {
+			if ( empty( $pairs['en'] ) ) {
+				$pairs['en'] = $src_url;
+			}
+			$pairs['x-default'] = $src_url;
+		}
+
+		if ( ! $pairs ) {
+			return;
+		}
+
+		foreach ( $pairs as $code => $url ) {
+			echo '<link rel="alternate" hreflang="' . esc_attr( $code ) . '" href="' . esc_url( $url ) . "\" />\n";
+		}
+	}
 }
+
+
 /* === REEID: force hreflang on Woo single product URLs (virtual translations too) === */
-if (!function_exists('reeid_wc_hreflang_ob')) {
-  add_action('template_redirect', function () {
-    // Detect /product/ page (with or without lang prefix)
-    $req = isset($GLOBALS['wp']->request) ? '/'.ltrim($GLOBALS['wp']->request,'/') : parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    if (!$req || !preg_match('#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m)) return;
+if ( ! function_exists( 'reeid_wc_hreflang_ob' ) ) {
+	add_action(
+		'template_redirect',
+		function () {
 
-    ob_start(function($html) use ($m, $req) {
-      // If hreflang already present, leave as is
-      if (preg_match('/<link[^>]+rel=["\']alternate["\'][^>]*hreflang=/i', $html)) return $html;
+			global $wp;
 
-      $cur_lang = isset($m[1]) && $m[1] !== '' ? strtolower($m[1]) : 'en';
-      $slug     = $m[2];
+			if ( isset( $wp->request ) ) {
 
-      // Resolve source EN product by stripping lang prefix from path
-      $host = (is_ssl() ? 'https://' : 'http://').$_SERVER['HTTP_HOST'];
-      $en_path = preg_match('#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#', $req, $mm) ? '/'.$mm[1] : $req;
-      $src_id = reeid_url_to_postid_prefixed($host.$en_path); if (!$src_id) { $po = get_page_by_path($slug, OBJECT, 'product'); $src_id = $po ? $po->ID : 0; }
-      if (!$src_id) return $html;
-      $src_url = get_permalink($src_id);
-      if (!$src_url) return $html;
+				$req = '/' . ltrim( $wp->request, '/' );
 
-      // Current URL (ensure trailing slash)
-      $self_url = $host . (rtrim($req,'/').'/');
+			} else {
 
-      // Gather any physical children if they exist
-      $pairs = [];
-      $kids = get_posts([
-        'post_type'=>'product','post_status'=>'publish','posts_per_page'=>50,
-        'meta_query'=>[['key'=>'_reeid_translation_source','value'=>strval($src_id),'compare'=>'=']]
-      ]);
-      foreach($kids as $p){
-        $lg = get_post_meta($p->ID,'_reeid_translation_lang',true);
-        $url= get_permalink($p->ID);
-        if ($lg && $url) $pairs[$lg]=$url;
-      }
+				$raw = isset( $_SERVER['REQUEST_URI'] )
+					? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) )
+					: '';
 
-      // Always include self + EN + x-default
-      $pairs[$cur_lang] = $self_url;
-      $pairs['en'] = $src_url;
-      $pairs['x-default'] = $src_url;
+				$u   = wp_parse_url( esc_url_raw( $raw ) );
+				$req = isset( $u['path'] ) ? $u['path'] : '';
+			}
 
-      // Percent-encode non-ASCII segments
-      $encode = function($u){
-        $p=@parse_url($u); if(!$p||empty($p['path'])) return $u;
-        $segs=explode('/',$p['path']);
-        foreach($segs as $i=>$s){ if($s!=='' && preg_match('/[^\x00-\x7F]/u',$s)) $segs[$i]=rawurlencode($s); }
-        $p['path']=implode('/',$segs);
-        return (isset($p['scheme'])?$p['scheme'].'://':'').($p['host']??'').(isset($p['port'])?':'.$p['port']:'').($p['path']??'').(isset($p['query'])?('?'.$p['query']):'').(isset($p['fragment'])?('#'.$p['fragment']):'');
-      };
+			if ( ! $req || ! preg_match( '#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m ) ) {
+				return;
+			}
 
-      $tags = "";
-      foreach ($pairs as $code=>$url){
-        $tags .= '<link rel="alternate" hreflang="'.esc_attr($code).'" href="'.esc_url($encode($url)).'" />'."\n";
-      }
+			ob_start(
+				function ( $html ) use ( $m, $req ) {
 
-      // Inject before </head>
-      if (preg_match('/<\/head>/i', $html)) {
-        $html = preg_replace('/<\/head>/i', $tags.'</head>', $html, 1);
-      } else {
-        $html = $tags.$html;
-      }
-      return $html;
-    });
-  }, 0);
+					if ( preg_match( '/<link[^>]+rel=["\']alternate["\'][^>]*hreflang=/i', $html ) ) {
+						return $html;
+					}
+
+					$cur_lang = ( isset( $m[1] ) && $m[1] !== '' ) ? strtolower( $m[1] ) : 'en';
+					$slug     = $m[2];
+
+					$scheme = is_ssl() ? 'https://' : 'http://';
+					$host   = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ?? '' ) );
+
+					if ( preg_match( '#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#', $req, $mm ) ) {
+						$en_path = '/' . $mm[1];
+					} else {
+						$en_path = $req;
+					}
+
+					$src_id = reeid_url_to_postid_prefixed( $scheme . $host . $en_path );
+					if ( ! $src_id ) {
+						$po     = get_page_by_path( $slug, OBJECT, 'product' );
+						$src_id = $po ? $po->ID : 0;
+					}
+					if ( ! $src_id ) {
+						return $html;
+					}
+
+					$src_url = get_permalink( $src_id );
+					if ( ! $src_url ) {
+						return $html;
+					}
+
+					$self_url = $scheme . $host . ( rtrim( $req, '/' ) . '/' );
+
+					$pairs = array();
+					$kids  = get_posts(
+						array(
+							'post_type'      => 'product',
+							'post_status'    => 'publish',
+							'posts_per_page' => 50,
+							/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+							'meta_query'     => array(
+								array(
+									'key'     => '_reeid_translation_source',
+									'value'   => (string) $src_id,
+									'compare' => '=',
+								),
+							),
+						)
+					);
+
+					foreach ( $kids as $p ) {
+						$lg  = get_post_meta( $p->ID, '_reeid_translation_lang', true );
+						$url = get_permalink( $p->ID );
+						if ( $lg && $url ) {
+							$pairs[ $lg ] = $url;
+						}
+					}
+
+					$pairs[ $cur_lang ] = $self_url;
+					$pairs['en']        = $src_url;
+					$pairs['x-default'] = $src_url;
+
+					$encode = function ( $u ) {
+
+						$u = esc_url_raw( $u );
+						$p = wp_parse_url( $u );
+
+						if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+							return $u;
+						}
+
+						$segs = explode( '/', $p['path'] );
+						foreach ( $segs as $i => $s ) {
+							if ( $s !== '' && preg_match( '/[^\x00-\x7F]/u', $s ) ) {
+								$segs[ $i ] = rawurlencode( $s );
+							}
+						}
+
+						$p['path'] = implode( '/', $segs );
+
+						return ( isset( $p['scheme'] ) ? $p['scheme'] . '://' : '' )
+							. ( $p['host'] ?? '' )
+							. ( isset( $p['port'] ) ? ':' . $p['port'] : '' )
+							. ( $p['path'] ?? '' )
+							. ( isset( $p['query'] ) ? '?' . $p['query'] : '' )
+							. ( isset( $p['fragment'] ) ? '#' . $p['fragment'] : '' );
+					};
+
+					$tags = '';
+					foreach ( $pairs as $code => $url ) {
+						$tags .= '<link rel="alternate" hreflang="' . esc_attr( $code ) . '" href="' . esc_url( $encode( $url ) ) . "\" />\n";
+					}
+
+					if ( preg_match( '/<\/head>/i', $html ) ) {
+						return preg_replace( '/<\/head>/i', $tags . '</head>', $html, 1 );
+					}
+
+					return $tags . $html;
+				}
+			);
+		},
+		0
+	);
 }
-# REEID: FORCE hreflang for any /product/ single (works even if Woo/templating bypasses is_product)
-add_action('wp_head', function () {
-  $req = isset($GLOBALS['wp']->request) ? '/'.ltrim($GLOBALS['wp']->request,'/') : parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-  if (!$req || !preg_match('#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m)) return;
 
-  $cur_lang = isset($m[1]) && $m[1] !== '' ? strtolower($m[1]) : 'en';
-  $slug     = $m[2];
 
-  // Source URL (EN or base product)
-  $host = (is_ssl() ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'];
-  $en_path = preg_match('#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#', $req, $mm) ? '/'.$mm[1] : $req;
-  $src_id = reeid_url_to_postid_prefixed($host.$en_path);
-  if (!$src_id) { $po = get_page_by_path($slug, OBJECT, 'product'); $src_id = $po ? $po->ID : 0; }
-  $src_url = $src_id ? get_permalink($src_id) : ($host.$en_path);
+/* REEID: FORCE hreflang for any /product/ single (works even if Woo/templating bypasses is_product) */
+add_action( 'wp_head', function () {
 
-  // Self URL
-  $self_url = $host . (rtrim($req,'/').'/');
+	global $wp;
 
-  // Encode non-ASCII path segments
-  $encode = function($u){
-    $p=@parse_url($u); if(!$p||empty($p['path'])) return $u;
-    $segs=explode('/',$p['path']);
-    foreach($segs as $i=>$s){ if($s!=='' && preg_match('/[^\x00-\x7F]/u',$s)) $segs[$i]=rawurlencode($s); }
-    $p['path']=implode('/',$segs);
-    return (isset($p['scheme'])?$p['scheme'].'://':'').($p['host']??'').(isset($p['port'])?':'.$p['port']:'').($p['path']??'').(isset($p['query'])?('?'.$p['query']):'').(isset($p['fragment'])?('#'.$p['fragment']):'');
-  };
+	if ( isset( $wp->request ) ) {
 
-  // Emit minimal set (+any physical children if present)
-  $pairs = [ $cur_lang => $self_url ];
-  if ($src_url) { $pairs['en'] = $src_url; $pairs['x-default'] = $src_url; }
+		$req = '/' . ltrim( $wp->request, '/' );
 
-  $kids = get_posts([
-    'post_type'=>'product','post_status'=>'publish','posts_per_page'=>50,
-    'meta_query'=>[['key'=>'_reeid_translation_source','value'=>strval($src_id),'compare'=>'=']]
-  ]);
-  foreach($kids as $p){
-    $lg = get_post_meta($p->ID,'_reeid_translation_lang',true);
-    $url= get_permalink($p->ID);
-    if ($lg && $url) $pairs[$lg]=$url;
-  }
+	} else {
 
-  // Marker for debugging
-  echo "<!-- REEID-WC-HREFLANG -->\n";
-  foreach ($pairs as $code=>$url){
-    echo '<link rel="alternate" hreflang="'.esc_attr($code).'" href="'.esc_url($encode($url)).'" />'."\n";
-  }
-}, 3);
-/* REEID: debug injector for Woo product hreflang (enable via ?rt_wc_hreflang=1) */
-add_action('template_redirect', function () {
-  if (empty($_GET['rt_wc_hreflang'])) return;
-  $req = isset($GLOBALS['wp']->request) ? '/'.ltrim($GLOBALS['wp']->request,'/') : parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-  if (!$req || !preg_match('#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m)) return;
+		$raw = isset( $_SERVER['REQUEST_URI'] )
+			? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) )
+			: '';
 
-  ob_start(function($html) use ($m,$req){
-    // bail if already present
-    if (preg_match('/<link[^>]+rel=["\']alternate["\'][^>]*hreflang=/i', $html)) return $html;
+		$u   = wp_parse_url( esc_url_raw( $raw ) );
+		$req = isset( $u['path'] ) ? $u['path'] : '';
+	}
 
-    $cur_lang = isset($m[1]) && $m[1] !== '' ? strtolower($m[1]) : 'en';
-    $slug     = $m[2];
-    $host = (is_ssl() ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'];
-    $en_path = preg_match('#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#', $req, $mm) ? '/'.$mm[1] : $req;
-    $src_id = reeid_url_to_postid_prefixed($host.$en_path); if(!$src_id){ $po=get_page_by_path($slug,OBJECT,'product'); $src_id=$po?$po->ID:0; }
-    $src_url = $src_id ? get_permalink($src_id) : ($host.$en_path);
-    $self_url = $host.(rtrim($req,'/').'/');
+	if ( ! $req || ! preg_match( '#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m ) ) {
+		return;
+	}
 
-    $pairs = [ $cur_lang=>$self_url ];
-    if ($src_url){ $pairs['en']=$src_url; $pairs['x-default']=$src_url; }
+	$cur_lang = ( isset( $m[1] ) && $m[1] !== '' ) ? strtolower( $m[1] ) : 'en';
+	$slug     = $m[2];
 
-    $kids = get_posts(['post_type'=>'product','post_status'=>'publish','posts_per_page'=>50,'meta_query'=>[
-      ['key'=>'_reeid_translation_source','value'=>strval($src_id),'compare'=>'=']
-    ]]);
-    foreach($kids as $p){ $lg=get_post_meta($p->ID,'_reeid_translation_lang',true); $url=get_permalink($p->ID); if($lg && $url) $pairs[$lg]=$url; }
+	$scheme = is_ssl() ? 'https://' : 'http://';
+	$host   = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ?? '' ) );
 
-    $encode=function($u){ $p=@parse_url($u); if(!$p||empty($p['path'])) return $u; $segs=explode('/',$p['path']); foreach($segs as $i=>$s){ if($s!=='' && preg_match('/[^\x00-\x7F]/u',$s)) $segs[$i]=rawurlencode($s);} $p['path']=implode('/',$segs);
-      return (isset($p['scheme'])?$p['scheme'].'://':'').($p['host']??'').(isset($p['port'])?':'.$p['port']:'').($p['path']??'').(isset($p['query'])?('?'.$p['query']):'').(isset($p['fragment'])?('#'.$p['fragment']):''); };
+	$en_path = preg_match(
+		'#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#',
+		$req,
+		$mm
+	) ? '/' . $mm[1] : $req;
 
-    $tags="<!-- REEID-WC-HREFLANG -->\n";
-    foreach($pairs as $code=>$url){ $tags .= '<link rel="alternate" hreflang="'.esc_attr($code).'" href="'.esc_url($encode($url)).'" />'."\n"; }
+	$src_id = reeid_url_to_postid_prefixed( $scheme . $host . $en_path );
+	if ( ! $src_id ) {
+		$po     = get_page_by_path( $slug, OBJECT, 'product' );
+		$src_id = $po ? $po->ID : 0;
+	}
 
-    return preg_match('/<\/head>/i',$html) ? preg_replace('/<\/head>/i',$tags.'</head>',$html,1) : ($tags.$html);
-  });
+	$src_url  = $src_id ? get_permalink( $src_id ) : ( $scheme . $host . $en_path );
+	$self_url = $scheme . $host . ( rtrim( $req, '/' ) . '/' );
 
-  // help bypass caches in debug
-  if (!headers_sent()) header('Cache-Control: no-cache, max-age=0', true);
-}, 0);
-/* REEID: debug injector for Woo product hreflang (enable via ?rt_wc_hreflang=1) */
-add_action('template_redirect', function () {
-  if (empty($_GET['rt_wc_hreflang'])) return;
-  $req = isset($GLOBALS['wp']->request) ? '/'.ltrim($GLOBALS['wp']->request,'/') : parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-  if (!$req || !preg_match('#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m)) return;
+	$encode = function ( $u ) {
 
-  ob_start(function($html) use ($m,$req){
-    // bail if already present
-    if (preg_match('/<link[^>]+rel=["\']alternate["\'][^>]*hreflang=/i', $html)) return $html;
+		$u = esc_url_raw( $u );
+		$p = wp_parse_url( $u );
 
-    $cur_lang = isset($m[1]) && $m[1] !== '' ? strtolower($m[1]) : 'en';
-    $slug     = $m[2];
-    $host = (is_ssl() ? 'https://' : 'http://') . $_SERVER['HTTP_HOST'];
-    $en_path = preg_match('#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#', $req, $mm) ? '/'.$mm[1] : $req;
-    $src_id = reeid_url_to_postid_prefixed($host.$en_path); if(!$src_id){ $po=get_page_by_path($slug,OBJECT,'product'); $src_id=$po?$po->ID:0; }
-    $src_url = $src_id ? get_permalink($src_id) : ($host.$en_path);
-    $self_url = $host.(rtrim($req,'/').'/');
+		if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+			return $u;
+		}
 
-    $pairs = [ $cur_lang=>$self_url ];
-    if ($src_url){ $pairs['en']=$src_url; $pairs['x-default']=$src_url; }
+		$segs = explode( '/', $p['path'] );
+		foreach ( $segs as $i => $s ) {
+			if ( $s !== '' && preg_match( '/[^\x00-\x7F]/u', $s ) ) {
+				$segs[ $i ] = rawurlencode( $s );
+			}
+		}
 
-    $kids = get_posts(['post_type'=>'product','post_status'=>'publish','posts_per_page'=>50,'meta_query'=>[
-      ['key'=>'_reeid_translation_source','value'=>strval($src_id),'compare'=>'=']
-    ]]);
-    foreach($kids as $p){ $lg=get_post_meta($p->ID,'_reeid_translation_lang',true); $url=get_permalink($p->ID); if($lg && $url) $pairs[$lg]=$url; }
+		$p['path'] = implode( '/', $segs );
 
-    $encode=function($u){ $p=@parse_url($u); if(!$p||empty($p['path'])) return $u; $segs=explode('/',$p['path']); foreach($segs as $i=>$s){ if($s!=='' && preg_match('/[^\x00-\x7F]/u',$s)) $segs[$i]=rawurlencode($s);} $p['path']=implode('/',$segs);
-      return (isset($p['scheme'])?$p['scheme'].'://':'').($p['host']??'').(isset($p['port'])?':'.$p['port']:'').($p['path']??'').(isset($p['query'])?('?'.$p['query']):'').(isset($p['fragment'])?('#'.$p['fragment']):''); };
+		return ( isset( $p['scheme'] ) ? $p['scheme'] . '://' : '' )
+			. ( $p['host'] ?? '' )
+			. ( isset( $p['port'] ) ? ':' . $p['port'] : '' )
+			. ( $p['path'] ?? '' )
+			. ( isset( $p['query'] ) ? '?' . $p['query'] : '' )
+			. ( isset( $p['fragment'] ) ? '#' . $p['fragment'] : '' );
+	};
 
-    $tags="<!-- REEID-WC-HREFLANG -->\n";
-    foreach($pairs as $code=>$url){ $tags .= '<link rel="alternate" hreflang="'.esc_attr($code).'" href="'.esc_url($encode($url)).'" />'."\n"; }
+	$pairs = array( $cur_lang => $self_url );
+	if ( $src_url ) {
+		$pairs['en']        = $src_url;
+		$pairs['x-default'] = $src_url;
+	}
 
-    return preg_match('/<\/head>/i',$html) ? preg_replace('/<\/head>/i',$tags.'</head>',$html,1) : ($tags.$html);
-  });
+	$kids = get_posts(
+	array(
+		'post_type'      => 'product',
+		'post_status'    => 'publish',
+		'posts_per_page' => 50,
+		/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+		'meta_query'     => array(
+			array(
+				'key'     => '_reeid_translation_source',
+				'value'   => (string) $src_id,
+				'compare' => '=',
+			),
+		),
+	)
+);
 
-  // help bypass caches in debug
-  if (!headers_sent()) header('Cache-Control: no-cache, max-age=0', true);
-}, 0);
+
+	foreach ( $kids as $p ) {
+		$lg  = get_post_meta( $p->ID, '_reeid_translation_lang', true );
+		$url = get_permalink( $p->ID );
+		if ( $lg && $url ) {
+			$pairs[ $lg ] = $url;
+		}
+	}
+
+	echo "<!-- REEID-WC-HREFLANG -->\n";
+	foreach ( $pairs as $code => $url ) {
+		echo '<link rel="alternate" hreflang="' . esc_attr( $code ) . '" href="' . esc_url( $encode( $url ) ) . "\" />\n";
+	}
+
+}, 3 );
+
+
+/* REEID: debug injector for Woo product hreflang (enable via ?rt_wc_hreflang=1&_wpnonce=XXX) */
+add_action( 'template_redirect', function () {
+
+	// Debug flag must be explicitly enabled
+	if ( empty( $_GET['rt_wc_hreflang'] ) ) {
+		return;
+	}
+
+	// Nonce verification (read-only GET debug toggle)
+	$nonce = isset( $_GET['_wpnonce'] )
+		? sanitize_text_field( wp_unslash( $_GET['_wpnonce'] ) )
+		: '';
+
+	if ( ! wp_verify_nonce( $nonce, 'reeid_wc_hreflang_debug' ) ) {
+		return;
+	}
+
+	global $wp;
+
+	if ( isset( $wp->request ) ) {
+
+		$req = '/' . ltrim( $wp->request, '/' );
+
+	} else {
+
+		$raw = isset( $_SERVER['REQUEST_URI'] )
+			? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) )
+			: '';
+
+		$u   = wp_parse_url( esc_url_raw( $raw ) );
+		$req = isset( $u['path'] ) ? $u['path'] : '';
+	}
+
+	if ( ! $req || ! preg_match( '#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m ) ) {
+		return;
+	}
+
+	ob_start( function ( $html ) use ( $m, $req ) {
+
+		if ( preg_match( '/<link[^>]+rel=["\']alternate["\'][^>]*hreflang=/i', $html ) ) {
+			return $html;
+		}
+
+		$cur_lang = ( isset( $m[1] ) && $m[1] !== '' ) ? strtolower( $m[1] ) : 'en';
+		$slug     = $m[2];
+
+		$scheme = is_ssl() ? 'https://' : 'http://';
+		$host   = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ?? '' ) );
+
+		$en_path = preg_match(
+			'#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#',
+			$req,
+			$mm
+		) ? '/' . $mm[1] : $req;
+
+		$src_id = reeid_url_to_postid_prefixed( $scheme . $host . $en_path );
+		if ( ! $src_id ) {
+			$po     = get_page_by_path( $slug, OBJECT, 'product' );
+			$src_id = $po ? $po->ID : 0;
+		}
+
+		$src_url  = $src_id ? get_permalink( $src_id ) : ( $scheme . $host . $en_path );
+		$self_url = $scheme . $host . ( rtrim( $req, '/' ) . '/' );
+
+		$pairs = array( $cur_lang => $self_url );
+		if ( $src_url ) {
+			$pairs['en']        = $src_url;
+			$pairs['x-default'] = $src_url;
+		}
+
+		$kids = get_posts(
+	array(
+		'post_type'      => 'product',
+		'post_status'    => 'publish',
+		'posts_per_page' => 50,
+		/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+		'meta_query'     => array(
+			array(
+				'key'     => '_reeid_translation_source',
+				'value'   => (string) $src_id,
+				'compare' => '=',
+			),
+		),
+	)
+);
+
+
+		foreach ( $kids as $p ) {
+			$lg  = get_post_meta( $p->ID, '_reeid_translation_lang', true );
+			$url = get_permalink( $p->ID );
+			if ( $lg && $url ) {
+				$pairs[ $lg ] = $url;
+			}
+		}
+
+		$encode = function ( $u ) {
+
+			$u = esc_url_raw( $u );
+			$p = wp_parse_url( $u );
+
+			if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+				return $u;
+			}
+
+			$segs = explode( '/', $p['path'] );
+			foreach ( $segs as $i => $s ) {
+				if ( $s !== '' && preg_match( '/[^\x00-\x7F]/u', $s ) ) {
+					$segs[ $i ] = rawurlencode( $s );
+				}
+			}
+
+			$p['path'] = implode( '/', $segs );
+
+			return ( isset( $p['scheme'] ) ? $p['scheme'] . '://' : '' )
+				. ( $p['host'] ?? '' )
+				. ( isset( $p['port'] ) ? ':' . $p['port'] : '' )
+				. ( $p['path'] ?? '' )
+				. ( isset( $p['query'] ) ? '?' . $p['query'] : '' )
+				. ( isset( $p['fragment'] ) ? '#' . $p['fragment'] : '' );
+		};
+
+		$tags = "<!-- REEID-WC-HREFLANG -->\n";
+		foreach ( $pairs as $code => $url ) {
+			$tags .= '<link rel="alternate" hreflang="' . esc_attr( $code ) . '" href="' . esc_url( $encode( $url ) ) . "\" />\n";
+		}
+
+		return preg_match( '/<\/head>/i', $html )
+			? preg_replace( '/<\/head>/i', $tags . '</head>', $html, 1 )
+			: ( $tags . $html );
+	} );
+
+	if ( ! headers_sent() ) {
+		header( 'Cache-Control: no-cache, max-age=0', true );
+	}
+
+}, 0 );
+
+
+
 
 /* === REEID: Woo product hreflang (native + virtual) === */
-if (!function_exists('reeid_wc_hreflang_simple')) {
-  add_action('wp_head','reeid_wc_hreflang_simple', 90);
-  function reeid_wc_hreflang_simple(){
-    // already present? bail
-    if (did_action('wp_head')) {
-      // we can't read buffer; quick DOM probe via wp_query not possible; rely on flag from our emitter
-      if (defined('REEID_HREFLANG_PRINTED') && REEID_HREFLANG_PRINTED) return;
-    }
-    // detect product request (with or w/o lang prefix)
-    $req = isset($GLOBALS['wp']->request) ? '/'.ltrim($GLOBALS['wp']->request,'/') : parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-    if (!$req || !preg_match('#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m)) return;
+if ( ! function_exists( 'reeid_wc_hreflang_simple' ) ) {
 
-    $cur_lang = isset($m[1]) && $m[1]!=='' ? strtolower($m[1]) : 'en';
-    $slug     = $m[2];
-    $host     = (is_ssl()?'https://':'http://').$_SERVER['HTTP_HOST'];
-    $en_path  = preg_match('#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#',$req,$mm)?('/'.$mm[1]):$req;
+	add_action( 'wp_head', 'reeid_wc_hreflang_simple', 90 );
 
-    // resolve source/base product
-    $src_id = reeid_url_to_postid_prefixed($host.$en_path);
-    if(!$src_id){ $po=get_page_by_path($slug, OBJECT, 'product'); $src_id=$po?$po->ID:0; }
-    $src_url = $src_id ? get_permalink($src_id) : ($host.$en_path);
+	function reeid_wc_hreflang_simple() {
 
-    $self_url = $host.(rtrim($req,'/').'/');
+		// already present? bail
+		if ( did_action( 'wp_head' ) ) {
+			if ( defined( 'REEID_HREFLANG_PRINTED' ) && REEID_HREFLANG_PRINTED ) {
+				return;
+			}
+		}
 
-    // collect children if exist
-    $pairs = [];
-    if ($src_id){
-      $kids = get_posts(['post_type'=>'product','post_status'=>'publish','posts_per_page'=>100,'meta_query'=>[
-        ['key'=>'_reeid_translation_source','value'=>strval($src_id),'compare'=>'=']
-      ]]);
-      foreach($kids as $p){ $lg=get_post_meta($p->ID,'_reeid_translation_lang',true); $url=get_permalink($p->ID); if($lg && $url) $pairs[$lg]=$url; }
-    }
-    // minimal set
-    $pairs[$cur_lang]=$self_url;
-    if ($src_url){ $pairs['en']=$src_url; $pairs['x-default']=$src_url; }
+		// detect product request (with or w/o lang prefix)
+		global $wp;
 
-    // encode non-ASCII path segments
-    if (!function_exists('reeid_encode_url_path')) {
-      function reeid_encode_url_path($u){
-        $p=@parse_url($u); if(!$p||empty($p['path'])) return $u;
-        $segs=explode('/',$p['path']);
-        foreach($segs as $i=>$s){ if($s!=='' && preg_match('/[^\x00-\x7F]/u',$s)) $segs[$i]=rawurlencode($s); }
-        $p['path']=implode('/',$segs);
-        return (isset($p['scheme'])?$p['scheme'].'://':'').($p['host']??'').(isset($p['port'])?':'.$p['port']:'').($p['path']??'').(isset($p['query'])?('?'.$p['query']):'').(isset($p['fragment'])?('#'.$p['fragment']):'');
-      }
-    }
+		if ( isset( $wp->request ) ) {
 
-    define('REEID_HREFLANG_PRINTED', true);
-    foreach($pairs as $code=>$url){
-      echo '<link rel="alternate" hreflang="'.esc_attr($code).'" href="'.esc_url(reeid_encode_url_path($url)).'" />'."\n";
-    }
-  }
+			$req = '/' . ltrim( $wp->request, '/' );
+
+		} else {
+
+			$raw = isset( $_SERVER['REQUEST_URI'] )
+				? sanitize_text_field( wp_unslash( $_SERVER['REQUEST_URI'] ) )
+				: '';
+
+			$u   = wp_parse_url( esc_url_raw( $raw ) );
+			$req = isset( $u['path'] ) ? $u['path'] : '';
+		}
+
+		if ( ! $req || ! preg_match( '#^/(?:([a-z]{2}(?:-[A-Za-z]{2})?)/)?product/([^/]+)/?#', $req, $m ) ) {
+			return;
+		}
+
+		$cur_lang = ( isset( $m[1] ) && $m[1] !== '' ) ? strtolower( $m[1] ) : 'en';
+		$slug     = $m[2];
+
+		$scheme = is_ssl() ? 'https://' : 'http://';
+		$host   = sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ?? '' ) );
+
+		$en_path = preg_match(
+			'#^/[a-z]{2}(?:-[A-Za-z]{2})?/(product/.+)$#',
+			$req,
+			$mm
+		) ? '/' . $mm[1] : $req;
+
+		// resolve source/base product
+		$src_id = reeid_url_to_postid_prefixed( $scheme . $host . $en_path );
+		if ( ! $src_id ) {
+			$po     = get_page_by_path( $slug, OBJECT, 'product' );
+			$src_id = $po ? $po->ID : 0;
+		}
+
+		$src_url  = $src_id ? get_permalink( $src_id ) : ( $scheme . $host . $en_path );
+		$self_url = $scheme . $host . ( rtrim( $req, '/' ) . '/' );
+
+		// collect children if exist
+		$pairs = array();
+
+		if ( $src_id ) {
+	$kids = get_posts(
+		array(
+			'post_type'      => 'product',
+			'post_status'    => 'publish',
+			'posts_per_page' => 100,
+			/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+			'meta_query'     => array(
+				array(
+					'key'     => '_reeid_translation_source',
+					'value'   => (string) $src_id,
+					'compare' => '=',
+				),
+			),
+		)
+	);
+
+	foreach ( $kids as $p ) {
+		$lg  = get_post_meta( $p->ID, '_reeid_translation_lang', true );
+		$url = get_permalink( $p->ID );
+		if ( $lg && $url ) {
+			$pairs[ $lg ] = $url;
+		}
+	}
 }
-add_action('wp_head', function(){ echo "<!-- RT: wp_head alive -->\n"; }, 1);
+
+
+		// minimal set
+		$pairs[ $cur_lang ] = $self_url;
+		if ( $src_url ) {
+			$pairs['en']        = $src_url;
+			$pairs['x-default'] = $src_url;
+		}
+
+		// encode non-ASCII path segments
+		if ( ! function_exists( 'reeid_encode_url_path' ) ) {
+			function reeid_encode_url_path( $u ) {
+
+				$u = esc_url_raw( $u );
+				$p = wp_parse_url( $u );
+
+				if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+					return $u;
+				}
+
+				$segs = explode( '/', $p['path'] );
+				foreach ( $segs as $i => $s ) {
+					if ( $s !== '' && preg_match( '/[^\x00-\x7F]/u', $s ) ) {
+						$segs[ $i ] = rawurlencode( $s );
+					}
+				}
+
+				$p['path'] = implode( '/', $segs );
+
+				return ( isset( $p['scheme'] ) ? $p['scheme'] . '://' : '' )
+					. ( $p['host'] ?? '' )
+					. ( isset( $p['port'] ) ? ':' . $p['port'] : '' )
+					. ( $p['path'] ?? '' )
+					. ( isset( $p['query'] ) ? '?' . $p['query'] : '' )
+					. ( isset( $p['fragment'] ) ? '#' . $p['fragment'] : '' );
+			}
+		}
+
+		define( 'REEID_HREFLANG_PRINTED', true );
+
+		foreach ( $pairs as $code => $url ) {
+			echo '<link rel="alternate" hreflang="' . esc_attr( $code ) . '" href="' . esc_url( reeid_encode_url_path( $url ) ) . "\" />\n";
+		}
+	}
+}
+
+add_action( 'wp_head', function () {
+	echo "<!-- RT: wp_head alive -->\n";
+}, 1 );
+
+
 
 
 
 
 
 /* === REEID: WooCommerce product hreflang emitter (self-contained) === */
-add_action('wp_head', function () {
-    if (is_admin()) return;
-    if (!function_exists('is_product') || !is_product()) return;
+add_action( 'wp_head', function () {
 
-    // If another plugin already prints hreflang, skip to avoid duplicates.
-    // (Quick heuristic: bail if <link rel="alternate" hreflang> already buffered by theme/plugin.)
-    // We can't inspect the buffer reliably here, so keep this simple & opinionated:
-    // Rank Math/Yoast typically won't emit hreflang for custom meta setups, so we proceed.
+	if ( is_admin() ) {
+		return;
+	}
 
-    global $post;
-    if (empty($post) || empty($post->ID)) return;
+	if ( ! function_exists( 'is_product' ) || ! is_product() ) {
+		return;
+	}
 
-    $cur_id  = (int) $post->ID;
-    $cur_lng = get_post_meta($cur_id, '_reeid_translation_lang', true);
-    if (!$cur_lng) $cur_lng = 'en';
+	global $post;
+	if ( empty( $post ) || empty( $post->ID ) ) {
+		return;
+	}
 
-    // Resolve the source (canonical) product id; default to current if not linked
-    $src_meta = get_post_meta($cur_id, '_reeid_translation_source', true);
-    $src_id   = $src_meta ? (int) $src_meta : $cur_id;
+	$cur_id  = (int) $post->ID;
+	$cur_lng = get_post_meta( $cur_id, '_reeid_translation_lang', true );
+	if ( ! $cur_lng ) {
+		$cur_lng = 'en';
+	}
 
-    $pairs = [];
+	// Resolve source (canonical) product
+	$src_meta = get_post_meta( $cur_id, '_reeid_translation_source', true );
+	$src_id   = $src_meta ? (int) $src_meta : $cur_id;
 
-    // Always include self
-    $self_url = get_permalink($cur_id);
-    if (!$self_url) return;
-    $pairs[$cur_lng] = $self_url;
+	$pairs = array();
 
-    // Include EN + x-default pointing to source (usually EN)
-    $src_url = get_permalink($src_id);
-    if ($src_url) {
-        $pairs['en']        = $src_url;
-        $pairs['x-default'] = $src_url;
-    }
+	// Always include self
+	$self_url = get_permalink( $cur_id );
+	if ( ! $self_url ) {
+		return;
+	}
+	$pairs[ $cur_lng ] = $self_url;
 
-    // Pull translated siblings
-    $kids = get_posts([
-        'post_type'      => 'product',
-        'post_status'    => 'publish',
-        'posts_per_page' => 50,
-        'meta_query'     => [
-            ['key' => '_reeid_translation_source', 'value' => strval($src_id), 'compare' => '=']
-        ],
-        'fields'         => 'ids',
-    ]);
+	// Include EN + x-default
+	$src_url = get_permalink( $src_id );
+	if ( $src_url ) {
+		$pairs['en']        = $src_url;
+		$pairs['x-default'] = $src_url;
+	}
 
-    foreach ($kids as $pid) {
-        $lng = get_post_meta($pid, '_reeid_translation_lang', true);
-        $url = get_permalink($pid);
-        if ($lng && $url) $pairs[$lng] = $url;
-    }
+	// Pull translated siblings
+$kids = get_posts(
+	array(
+		'post_type'      => 'product',
+		'post_status'    => 'publish',
+		'posts_per_page' => 50,
+		'fields'         => 'ids',
+		/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+		'meta_query'     => array(
+			array(
+				'key'     => '_reeid_translation_source',
+				'value'   => (string) $src_id,
+				'compare' => '=',
+			),
+		),
+	)
+);
 
-    // Encode non-ASCII path segments safely
-    if (!function_exists('reeid_encode_url_path')) {
-        function reeid_encode_url_path($u) {
-            $p = @parse_url($u);
-            if (!$p || empty($p['path'])) return $u;
-            $segs = explode('/', $p['path']);
-            foreach ($segs as $i => $s) {
-                if ($s !== '' && preg_match('/[^\x00-\x7F]/u', $s)) $segs[$i] = rawurlencode($s);
-            }
-            $p['path'] = implode('/', $segs);
-            return (isset($p['scheme']) ? $p['scheme'].'://' : '')
-                 . ($p['host'] ?? '')
-                 . (isset($p['port']) ? ':'.$p['port'] : '')
-                 . ($p['path'] ?? '')
-                 . (isset($p['query']) ? '?'.$p['query'] : '')
-                 . (isset($p['fragment']) ? '#'.$p['fragment'] : '');
-        }
-    }
+foreach ( $kids as $pid ) {
+	$lng = get_post_meta( $pid, '_reeid_translation_lang', true );
+	$url = get_permalink( $pid );
+	if ( $lng && $url ) {
+		$pairs[ $lng ] = $url;
+	}
+}
 
-    echo "<!-- REEID-WC-HREFLANG -->\n";
-    foreach ($pairs as $code => $url) {
-        printf(
-            "<link rel=\"alternate\" hreflang=\"%s\" href=\"%s\" />\n",
-            esc_attr($code),
-            esc_url(reeid_encode_url_path($url))
-        );
-    }
-}, 9);
+
+	// Encode non-ASCII path segments safely
+	if ( ! function_exists( 'reeid_encode_url_path' ) ) {
+		function reeid_encode_url_path( $u ) {
+
+			if ( ! is_string( $u ) || $u === '' ) {
+				return $u;
+			}
+
+			$u = esc_url_raw( $u );
+			$p = wp_parse_url( $u );
+
+			if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+				return $u;
+			}
+
+			$segs = explode( '/', $p['path'] );
+			foreach ( $segs as $i => $s ) {
+				if ( $s !== '' && preg_match( '/[^\x00-\x7F]/u', $s ) ) {
+					$segs[ $i ] = rawurlencode( $s );
+				}
+			}
+			$p['path'] = implode( '/', $segs );
+
+			return ( isset( $p['scheme'] ) ? $p['scheme'] . '://' : '' )
+				. ( $p['host'] ?? '' )
+				. ( isset( $p['port'] ) ? ':' . $p['port'] : '' )
+				. ( $p['path'] ?? '' )
+				. ( isset( $p['query'] ) ? '?' . $p['query'] : '' )
+				. ( isset( $p['fragment'] ) ? '#' . $p['fragment'] : '' );
+		}
+	}
+
+	echo "<!-- REEID-WC-HREFLANG -->\n";
+	foreach ( $pairs as $code => $url ) {
+		printf(
+			"<link rel=\"alternate\" hreflang=\"%s\" href=\"%s\" />\n",
+			esc_attr( $code ),
+			esc_url( reeid_encode_url_path( $url ) )
+		);
+	}
+
+}, 9 );
 
 
 /* === REEID: Woo product hreflang (self-contained) === */
-add_action('wp_head', function () {
-    // quick marker so we know this file/version actually ran
-    echo "<!-- REEID-WC-HREFLANG v1 -->\n";
+add_action( 'wp_head', function () {
 
-    if (is_admin()) return;
-    if (!function_exists('is_product') || !is_product()) return;
+	// quick marker so we know this file/version actually ran
+	echo "<!-- REEID-WC-HREFLANG v1 -->\n";
 
-    global $post;
-    if (empty($post) || empty($post->ID)) return;
+	if ( is_admin() ) {
+		return;
+	}
+	if ( ! function_exists( 'is_product' ) || ! is_product() ) {
+		return;
+	}
 
-    $cur_id  = (int) $post->ID;
-    $cur_lng = get_post_meta($cur_id, '_reeid_translation_lang', true);
-    if (!$cur_lng) $cur_lng = 'en';
+	global $post;
+	if ( empty( $post ) || empty( $post->ID ) ) {
+		return;
+	}
 
-    $src_meta = get_post_meta($cur_id, '_reeid_translation_source', true);
-    $src_id   = $src_meta ? (int) $src_meta : $cur_id;
+	$cur_id  = (int) $post->ID;
+	$cur_lng = get_post_meta( $cur_id, '_reeid_translation_lang', true );
+	if ( ! $cur_lng ) {
+		$cur_lng = 'en';
+	}
 
-    $pairs = [];
+	$src_meta = get_post_meta( $cur_id, '_reeid_translation_source', true );
+	$src_id   = $src_meta ? (int) $src_meta : $cur_id;
 
-    $self_url = get_permalink($cur_id);
-    if (!$self_url) return;
-    $pairs[$cur_lng] = $self_url;
+	$pairs = array();
 
-    $src_url = get_permalink($src_id);
-    if ($src_url) {
-        $pairs['en']        = $src_url;
-        $pairs['x-default'] = $src_url;
-    }
+	$self_url = get_permalink( $cur_id );
+	if ( ! $self_url ) {
+		return;
+	}
+	$pairs[ $cur_lng ] = $self_url;
 
-    $kids = get_posts([
-        'post_type'      => 'product',
-        'post_status'    => 'publish',
-        'posts_per_page' => 50,
-        'meta_query'     => [
-            ['key' => '_reeid_translation_source', 'value' => strval($src_id), 'compare' => '='],
-        ],
-        'fields'         => 'ids',
-    ]);
-    foreach ($kids as $pid) {
-        $lng = get_post_meta($pid, '_reeid_translation_lang', true);
-        $url = get_permalink($pid);
-        if ($lng && $url) $pairs[$lng] = $url;
-    }
+	$src_url = get_permalink( $src_id );
+	if ( $src_url ) {
+		$pairs['en']        = $src_url;
+		$pairs['x-default'] = $src_url;
+	}
 
-    if (!function_exists('reeid_encode_url_path')) {
-        function reeid_encode_url_path($u) {
-            $p = @parse_url($u);
-            if (!$p || empty($p['path'])) return $u;
-            $segs = explode('/', $p['path']);
-            foreach ($segs as $i => $s) {
-                if ($s !== '' && preg_match('/[^\x00-\x7F]/u', $s)) $segs[$i] = rawurlencode($s);
-            }
-            $p['path'] = implode('/', $segs);
-            return (isset($p['scheme']) ? $p['scheme'].'://' : '')
-                 . ($p['host'] ?? '')
-                 . (isset($p['port']) ? ':'.$p['port'] : '')
-                 . ($p['path'] ?? '')
-                 . (isset($p['query']) ? '?'.$p['query'] : '')
-                 . (isset($p['fragment']) ? '#'.$p['fragment'] : '');
-        }
-    }
+	$kids = get_posts(
+	array(
+		'post_type'      => 'product',
+		'post_status'    => 'publish',
+		'posts_per_page' => 50,
+		'fields'         => 'ids',
+		/* phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query */
+		'meta_query'     => array(
+			array(
+				'key'     => '_reeid_translation_source',
+				'value'   => (string) $src_id,
+				'compare' => '=',
+			),
+		),
+	)
+);
 
-    foreach ($pairs as $code => $url) {
-        printf(
-            "<link rel=\"alternate\" hreflang=\"%s\" href=\"%s\" />\n",
-            esc_attr($code),
-            esc_url(reeid_encode_url_path($url))
-        );
-    }
-}, 9);
+foreach ( $kids as $pid ) {
+	$lng = get_post_meta( $pid, '_reeid_translation_lang', true );
+	$url = get_permalink( $pid );
+	if ( $lng && $url ) {
+		$pairs[ $lng ] = $url;
+	}
+}
+
+	// Encode non-ASCII path segments safely
+	if ( ! function_exists( 'reeid_encode_url_path' ) ) {
+		function reeid_encode_url_path( $u ) {
+
+			if ( ! is_string( $u ) || $u === '' ) {
+				return $u;
+			}
+
+			$u = esc_url_raw( $u );
+			$p = wp_parse_url( $u );
+
+			if ( ! is_array( $p ) || empty( $p['path'] ) ) {
+				return $u;
+			}
+
+			$segs = explode( '/', $p['path'] );
+			foreach ( $segs as $i => $s ) {
+				if ( $s !== '' && preg_match( '/[^\x00-\x7F]/u', $s ) ) {
+					$segs[ $i ] = rawurlencode( $s );
+				}
+			}
+
+			$p['path'] = implode( '/', $segs );
+
+			return ( isset( $p['scheme'] ) ? $p['scheme'] . '://' : '' )
+				. ( $p['host'] ?? '' )
+				. ( isset( $p['port'] ) ? ':' . $p['port'] : '' )
+				. ( $p['path'] ?? '' )
+				. ( isset( $p['query'] ) ? '?' . $p['query'] : '' )
+				. ( isset( $p['fragment'] ) ? '#' . $p['fragment'] : '' );
+		}
+	}
+
+	foreach ( $pairs as $code => $url ) {
+		printf(
+			"<link rel=\"alternate\" hreflang=\"%s\" href=\"%s\" />\n",
+			esc_attr( $code ),
+			esc_url( reeid_encode_url_path( $url ) )
+		);
+	}
+
+}, 9 );
+
 
 // REEID fix: re-attach seo-sync hreflang on non-product singulars only.
 // Leave WooCommerce product SEO to the dedicated bridge.

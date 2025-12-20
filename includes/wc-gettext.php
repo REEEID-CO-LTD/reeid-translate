@@ -53,21 +53,23 @@ if ( ! function_exists( 'reeid_271r_norm' ) ) {
  * 3) Final fallback: "en".
  */
 if ( ! function_exists( 'reeid_271r_lang' ) ) {
-    function reeid_271r_lang(): string {
-        if ( function_exists( 'reeid_wc_resolve_lang_strong' ) ) {
-            $l = (string) reeid_wc_resolve_lang_strong();
-            if ( $l ) {
-                return reeid_271r_norm( $l );
-            }
-        }
+	function reeid_271r_lang(): string {
+		if ( function_exists( 'reeid_wc_resolve_lang_strong' ) ) {
+			$l = (string) reeid_wc_resolve_lang_strong();
+			if ( $l ) {
+				return reeid_271r_norm( $l );
+			}
+		}
 
-        if ( ! empty( $_COOKIE['site_lang'] ) ) {
-            return reeid_271r_norm( (string) $_COOKIE['site_lang'] );
-        }
+		if ( ! empty( $_COOKIE['site_lang'] ) ) {
+			$cookie_lang = sanitize_text_field( wp_unslash( $_COOKIE['site_lang'] ) );
+			return reeid_271r_norm( $cookie_lang );
+		}
 
-        return 'en';
-    }
+		return 'en';
+	}
 }
+
 
 /**
  * Load JSON map for a domain+lang (per-request cache, no cross-lang reuse).

@@ -103,10 +103,7 @@ return $combined;
 $inline_rule = 'Treat inline formatting tags (<strong>, <em>, <b>, <i>, <span>) as invisible for word order: translate as if tags were not there, but keep them on the same semantic words in the final result (you may move tags if natural word order changes).';
 if ( stripos( $combined, 'inline formatting tags' ) === false ) {
     $combined .= "\n\n---\n\n" . $inline_rule;
-}
-
-
-    
+}   
     }
     }
 
@@ -135,48 +132,44 @@ if (
     ));
 }
 
-// Sanitize all incoming POST variables
-$post_id      = isset($_POST['post_id']) ? (int) wp_unslash($_POST['post_id']) : 0;
-$raw_lang     = isset($_POST['lang']) ? wp_unslash($_POST['lang']) : '';
-$raw_tone     = isset($_POST['tone']) ? wp_unslash($_POST['tone']) : '';
-$raw_mode     = isset($_POST['reeid_publish_mode']) ? wp_unslash($_POST['reeid_publish_mode']) : '';
+// Sanitize all incoming POST variables (sanitize at read time)
+$post_id = isset( $_POST['post_id'] )
+	? absint( wp_unslash( $_POST['post_id'] ) )
+	: 0;
 
-$target_lang  = sanitize_text_field( $raw_lang );
-$tone         = sanitize_text_field( $raw_tone ?: 'Neutral' );
-$publish_mode = sanitize_text_field( $raw_mode ?: 'publish' );
+$raw_lang = isset( $_POST['lang'] )
+	? sanitize_text_field( wp_unslash( $_POST['lang'] ) )
+	: '';
+
+$raw_tone = isset( $_POST['tone'] )
+	? sanitize_text_field( wp_unslash( $_POST['tone'] ) )
+	: '';
+
+$raw_mode = isset( $_POST['reeid_publish_mode'] )
+	? sanitize_text_field( wp_unslash( $_POST['reeid_publish_mode'] ) )
+	: '';
+
+$target_lang  = $raw_lang;
+$tone         = $raw_tone !== '' ? $raw_tone : 'Neutral';
+$publish_mode = $raw_mode !== '' ? $raw_mode : 'publish';
 
 // Normalize language format
-$target_lang = strtolower( str_replace('_', '-', $target_lang) );
-$target_lang = preg_replace('/[^a-z0-9-]/', '', $target_lang);
-
-// Validate language format
-if ( ! preg_match('/^[a-z]{2}(?:-[a-z0-9]{2,8})?$/', $target_lang ) ) {
-    if ( function_exists( 'reeid_debug_log' ) ) {
-        reeid_debug_log(
-            'S18/INVALID_TARGET_LANG',
-            array(
-                'raw'  => $raw_lang,
-                'norm' => $target_lang,
-            )
-        );
-    }
-
-    wp_send_json_error( array(
-        'error'   => 'invalid_target_lang',
-        'message' => 'Target language format invalid.',
-    ));
-}
+$target_lang = strtolower( str_replace( '_', '-', $target_lang ) );
+$target_lang = preg_replace( '/[^a-z0-9-]/', '', $target_lang );
 
 /* >>> INJECTION START: prompt override (Elementor/Metabox/Woo) <<< */
 
-// Accept either prompt_override or legacy prompt
-$ui_override_raw = '';
+// Accept either prompt_override or legacy prompt (sanitize at read time)
 if ( isset( $_POST['prompt_override'] ) ) {
-    $ui_override_raw = wp_unslash( $_POST['prompt_override'] );
+	$ui_override = sanitize_textarea_field( wp_unslash( $_POST['prompt_override'] ) );
 } elseif ( isset( $_POST['prompt'] ) ) {
-    $ui_override_raw = wp_unslash( $_POST['prompt'] );
+	$ui_override = sanitize_textarea_field( wp_unslash( $_POST['prompt'] ) );
+} else {
+	$ui_override = '';
 }
-$ui_override = is_string( $ui_override_raw ) ? trim( $ui_override_raw ) : '';
+
+$ui_override = trim( $ui_override );
+
 
 // Build final system prompt
 $system_prompt = function_exists( 'reeid_get_combined_prompt' )

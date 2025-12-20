@@ -1513,176 +1513,78 @@ if ( file_exists( __DIR__ . '/quick-fixes/force-title-buffer.php' ) ) {
 /* ------------------------------------------------------------------
    FALLBACK PATCH: ensure product page head uses translated title/desc
    Applied late (priority 999) so it fixes RankMath/theme output.
-   Non-destructive — only runs on product single views and only when
-   a translated value exists (uses existing plugin helpers).
-   ------------------------------------------------------------------ */
-add_action('template_redirect', function () {
-    if (! function_exists('is_singular') || ! is_singular('product')) return;
-    ob_start(function ($html) {
-        if (! is_string($html) || $html === '') return $html;
+   SAFE: single-instance, guarded, product-only.
+------------------------------------------------------------------ */
+add_action( 'template_redirect', function () {
 
-        $pid = function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0;
-        if (! $pid) return $html;
+    // 🔒 HARD GUARD: run once only
+    static $ran = false;
+    if ( $ran ) {
+        return;
+    }
+    $ran = true;
 
-        $lang_fn = function_exists('reeid_current_lang_from_url') ? 'reeid_current_lang_from_url' : null;
-        $title_fn = function_exists('reeid_product_title_for_lang') ? 'reeid_product_title_for_lang' : null;
-        $excerpt_fn = function_exists('reeid_product_excerpt_for_lang') ? 'reeid_product_excerpt_for_lang' : null;
+    if ( ! function_exists( 'is_singular' ) || ! is_singular( 'product' ) ) {
+        return;
+    }
 
-        if (! $lang_fn || ! $title_fn || ! $excerpt_fn) {
+    ob_start( function ( $html ) {
+
+        if ( ! is_string( $html ) || $html === '' ) {
             return $html;
         }
 
-        $lang = (string) call_user_func($lang_fn);
-        $def  = (string) get_option('reeid_translation_source_lang', 'en');
-        if ($lang === '' || $lang === $def) return $html;
-
-        $translated_title   = trim( (string) call_user_func($title_fn, $pid, $lang) );
-        $translated_excerpt = trim( (string) call_user_func($excerpt_fn, $pid, $lang) );
-
-        if ($translated_title === '' && $translated_excerpt === '') return $html;
-
-        if ($translated_title !== '') {
-            $html = preg_replace('/<title>.*?<\/title>/is', '<title>' . esc_html($translated_title) . '</title>', $html, 1);
-            $html = preg_replace('/<meta\s+property=(["\'])og:title\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta property="og:title" content="' . esc_attr($translated_title) . '" />', $html, 1);
-            $html = preg_replace('/<meta\s+name=(["\'])twitter:title\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta name="twitter:title" content="' . esc_attr($translated_title) . '" />', $html, 1);
-        }
-
-        if ($translated_excerpt !== '') {
-            $html = preg_replace('/<meta\s+name=(["\'])description\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta name="description" content="' . esc_attr($translated_excerpt) . '" />', $html, 1);
-            $html = preg_replace('/<meta\s+property=(["\'])og:description\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta property="og:description" content="' . esc_attr($translated_excerpt) . '" />', $html, 1);
-            $html = preg_replace('/<meta\s+name=(["\'])twitter:description\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta name="twitter:description" content="' . esc_attr($translated_excerpt) . '" />', $html, 1);
-        }
-
-        if (preg_match_all('#<script\b[^>]*type=(["\'])application/ld\+json\1[^>]*>(.*?)</script>#is', $html, $scripts, PREG_SET_ORDER)) {
-            foreach ($scripts as $script) {
-                $full_tag = $script[0];
-                $json_text = trim($script[2]);
-                $decoded = json_decode($json_text, true);
-                if (! is_array($decoded)) continue;
-
-                $changed = false;
-
-                if (isset($decoded['@graph']) && is_array($decoded['@graph'])) {
-                    foreach ($decoded['@graph'] as &$node) {
-                        if (!is_array($node)) continue;
-                        $type = isset($node['@type']) ? (array) $node['@type'] : (isset($node['@type']) ? [$node['@type']] : []);
-                        if (in_array('Product', $type, true) || in_array('ItemPage', $type, true) || in_array('WebPage', $type, true)) {
-                            if ($translated_title !== '' && isset($node['name'])) { $node['name'] = $translated_title; $changed = true; }
-                            if ($translated_excerpt !== '' && isset($node['description'])) { $node['description'] = $translated_excerpt; $changed = true; }
-                            if (isset($node['inLanguage'])) { $node['inLanguage'] = (function_exists('reeid_locale_tag_from_code') ? reeid_locale_tag_from_code($lang) : strtoupper($lang).'-'.strtoupper($lang)); $changed = true; }
-                        }
-                    }
-                    unset($node);
-                } else {
-                    $types = isset($decoded['@type']) ? (array) $decoded['@type'] : [];
-                    if (in_array('Product', $types, true) || in_array('ItemPage', $types, true) || in_array('WebPage', $types, true)) {
-                        if ($translated_title !== '' && isset($decoded['name'])) { $decoded['name'] = $translated_title; $changed = true; }
-                        if ($translated_excerpt !== '' && isset($decoded['description'])) { $decoded['description'] = $translated_excerpt; $changed = true; }
-                        if (isset($decoded['inLanguage'])) { $decoded['inLanguage'] = (function_exists('reeid_locale_tag_from_code') ? reeid_locale_tag_from_code($lang) : strtoupper($lang).'-'.strtoupper($lang)); $changed = true; }
-                    }
-                }
-
-                if ($changed) {
-                    $replacement = '<script type="application/ld+json">' . wp_json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . '</script>';
-                    $html = str_replace($full_tag, $replacement, $html);
-                }
-            }
-        }
-
-        return $html;
-    }, 999);
-}, 999);
-/* ------------------------------------------------------------------
-   FALLBACK PATCH: ensure product page head uses translated title/desc
-   Applied late (priority 999) so it fixes RankMath/theme output.
-   Non-destructive — only runs on product single views and only when
-   a translated value exists (uses existing plugin helpers).
-   ------------------------------------------------------------------ */
-add_action('template_redirect', function () {
-    if (! function_exists('is_singular') || ! is_singular('product')) return;
-    ob_start(function ($html) {
-        if (! is_string($html) || $html === '') return $html;
-
-        $pid = function_exists('get_queried_object_id') ? (int) get_queried_object_id() : 0;
-        if (! $pid) return $html;
-
-        $lang_fn = function_exists('reeid_current_lang_from_url') ? 'reeid_current_lang_from_url' : null;
-        $title_fn = function_exists('reeid_product_title_for_lang') ? 'reeid_product_title_for_lang' : null;
-        $excerpt_fn = function_exists('reeid_product_excerpt_for_lang') ? 'reeid_product_excerpt_for_lang' : null;
-
-        if (! $lang_fn || ! $title_fn || ! $excerpt_fn) {
+        $pid = (int) get_queried_object_id();
+        if ( ! $pid ) {
             return $html;
         }
 
-        $lang = (string) call_user_func($lang_fn);
-        $def  = (string) get_option('reeid_translation_source_lang', 'en');
-        if ($lang === '' || $lang === $def) return $html;
-
-        $translated_title   = trim( (string) call_user_func($title_fn, $pid, $lang) );
-        $translated_excerpt = trim( (string) call_user_func($excerpt_fn, $pid, $lang) );
-
-        if ($translated_title === '' && $translated_excerpt === '') return $html;
-
-        if ($translated_title !== '') {
-            $html = preg_replace('/<title>.*?<\/title>/is', '<title>' . esc_html($translated_title) . '</title>', $html, 1);
-            $html = preg_replace('/<meta\s+property=(["\'])og:title\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta property="og:title" content="' . esc_attr($translated_title) . '" />', $html, 1);
-            $html = preg_replace('/<meta\s+name=(["\'])twitter:title\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta name="twitter:title" content="' . esc_attr($translated_title) . '" />', $html, 1);
+        if (
+            ! function_exists( 'reeid_current_lang_from_url' ) ||
+            ! function_exists( 'reeid_product_title_for_lang' ) ||
+            ! function_exists( 'reeid_product_excerpt_for_lang' )
+        ) {
+            return $html;
         }
 
-        if ($translated_excerpt !== '') {
-            $html = preg_replace('/<meta\s+name=(["\'])description\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta name="description" content="' . esc_attr($translated_excerpt) . '" />', $html, 1);
-            $html = preg_replace('/<meta\s+property=(["\'])og:description\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta property="og:description" content="' . esc_attr($translated_excerpt) . '" />', $html, 1);
-            $html = preg_replace('/<meta\s+name=(["\'])twitter:description\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
-                                 '<meta name="twitter:description" content="' . esc_attr($translated_excerpt) . '" />', $html, 1);
+        $lang = (string) reeid_current_lang_from_url();
+        $def  = (string) get_option( 'reeid_translation_source_lang', 'en' );
+
+        if ( $lang === '' || $lang === $def ) {
+            return $html;
         }
 
-        if (preg_match_all('#<script\b[^>]*type=(["\'])application/ld\+json\1[^>]*>(.*?)</script>#is', $html, $scripts, PREG_SET_ORDER)) {
-            foreach ($scripts as $script) {
-                $full_tag = $script[0];
-                $json_text = trim($script[2]);
-                $decoded = json_decode($json_text, true);
-                if (! is_array($decoded)) continue;
+        $title   = trim( (string) reeid_product_title_for_lang( $pid, $lang ) );
+        $excerpt = trim( (string) reeid_product_excerpt_for_lang( $pid, $lang ) );
 
-                $changed = false;
+        if ( $title === '' && $excerpt === '' ) {
+            return $html;
+        }
 
-                if (isset($decoded['@graph']) && is_array($decoded['@graph'])) {
-                    foreach ($decoded['@graph'] as &$node) {
-                        if (!is_array($node)) continue;
-                        $types = isset($node['@type']) ? (array) $node['@type'] : [];
-                        if (in_array('Product', $types, true) || in_array('ItemPage', $types, true) || in_array('WebPage', $types, true)) {
-                            if ($translated_title !== '') { $node['name'] = $translated_title; $changed = true; }
-                            if ($translated_excerpt !== '') { $node['description'] = $translated_excerpt; $changed = true; }
-                            if (isset($node['inLanguage'])) { $node['inLanguage'] = (function_exists('reeid_locale_tag_from_code') ? reeid_locale_tag_from_code($lang) : strtoupper($lang).'-'.strtoupper($lang)); $changed = true; }
-                        }
-                    }
-                    unset($node);
-                } else {
-                    $types = isset($decoded['@type']) ? (array) $decoded['@type'] : [];
-                    if (in_array('Product', $types, true) || in_array('ItemPage', $types, true) || in_array('WebPage', $types, true)) {
-                        if ($translated_title !== '') { $decoded['name'] = $translated_title; $changed = true; }
-                        if ($translated_excerpt !== '') { $decoded['description'] = $translated_excerpt; $changed = true; }
-                        if (isset($decoded['inLanguage'])) { $decoded['inLanguage'] = (function_exists('reeid_locale_tag_from_code') ? reeid_locale_tag_from_code($lang) : strtoupper($lang).'-'.strtoupper($lang)); $changed = true; }
-                    }
-                }
+        // <title> + meta
+        if ( $title !== '' ) {
+            $html = preg_replace(
+                '/<title>.*?<\/title>/is',
+                '<title>' . esc_html( $title ) . '</title>',
+                $html,
+                1
+            );
+        }
 
-                if ($changed) {
-                    $replacement = '<script type="application/ld+json">' . wp_json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . '</script>';
-                    $html = str_replace($full_tag, $replacement, $html);
-                }
-            }
+        if ( $excerpt !== '' ) {
+            $html = preg_replace(
+                '/<meta\s+name=(["\'])description\1\s+content=(["\'])(.*?)\2\s*\/?>/is',
+                '<meta name="description" content="' . esc_attr( $excerpt ) . '" />',
+                $html,
+                1
+            );
         }
 
         return $html;
-    }, 999);
-}, 999);
+
+    }, 0 );
+
+}, 999 );
+
 
 
