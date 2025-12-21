@@ -31,3 +31,5 @@ vendor/
 
 # WP specific
 wp-content/uploads/
+wpreeid-ssh
+wpreeid-ssh.pub

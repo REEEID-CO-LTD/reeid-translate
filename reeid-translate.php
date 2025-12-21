@@ -64,13 +64,18 @@ require_once __DIR__ . '/includes/wc-inline-runtime.php';
 require_once __DIR__ . '/includes/wc-admin-switcher-guard.php';
 require_once __DIR__ . '/includes/wc-gettext.php';
 require_once __DIR__ . '/includes/rt-wc-attrs-auto.php';
+require_once __DIR__ . '/includes/wc-inline-bridge.php';
 
 require_once __DIR__ . '/includes/frontend-switcher.php';
 require_once __DIR__ . '/includes/admin-columns.php';
-require_once __DIR__ . '/includes/routing-prequery.php';
-require_once __DIR__ . '/includes/routing-langcookie.php';
-require_once __DIR__ . '/includes/routing-core.php';
-require_once __DIR__ . '/includes/guard-template-redirect.php';
+//require_once __DIR__ . '/includes/routing-prequery.php';
+//require_once __DIR__ . '/includes/routing-langcookie.php';
+//require_once __DIR__ . '/includes/routing-core.php';
+//require_once __DIR__ . '/includes/guard-template-redirect.php';
+require_once __DIR__ . '/includes/guard-hreflang-wp-head.php';
+require_once __DIR__ . '/includes/wc-lang-rewrites.php';
+require_once __DIR__ . '/includes/wc-inline-canonical-redirect.php';
+
 
 
 if ( is_admin() ) {
@@ -2591,6 +2596,34 @@ if ( ! function_exists( 'reeid_translate_html_with_openai' ) ) {
             return $text;
         }
 
+        /*
+         * Explicit language instruction to prevent model drift
+         * (uses REEID pipeline languages, NOT locale/UI)
+         */
+        $lang_prompt = sprintf(
+            'Source language: %s. Target language: %s. Translate strictly between these languages.',
+            $source_lang,
+            $target_lang
+        );
+        $prompt = trim( $lang_prompt . ' ' . (string) $prompt );
+
+        /*
+         * Attribute-specific instruction (scoped, safe)
+         */
+        if ( $editor === 'woocommerce_attribute' ) {
+            $attr_prompt =
+                'This text is a WooCommerce product attribute value. '
+              . 'Translate it literally and precisely. '
+              . 'Do NOT summarize, generalize, or invent. '
+              . 'Preserve materials, units, numbers, proper nouns, and specificity. '
+              . 'Return ONLY the translated value. '
+              . 'If translation is not possible, return the source text unchanged.';
+            $prompt = trim( $prompt . ' ' . $attr_prompt );
+        }
+
+        /*
+         * Build final system prompt
+         */
         if ( function_exists( 'reeid_get_combined_prompt' ) ) {
             $system = reeid_get_combined_prompt( 0, $target_lang, (string) $prompt );
         } else {

@@ -23,8 +23,9 @@ add_action( 'init', function () {
     }
 
     $allowed = [
-        'reeid_emit_hreflang', // ← the ONLY allowed handler
-    ];
+    // NOTHING allowed here.
+    // hreflang must live in wp_head only.
+];
 
     foreach ( $wp_filter['template_redirect']->callbacks as $priority => $callbacks ) {
         foreach ( $callbacks as $id => $cb ) {

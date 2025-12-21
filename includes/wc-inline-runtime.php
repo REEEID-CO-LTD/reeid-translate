@@ -116,6 +116,64 @@ if ( is_string( $forced_raw ) && $forced_raw !== '' ) {
 			}
 		}
 
+
+// WC inline fallback: if product has inline langs, prefer first available
+if ( function_exists( 'get_queried_object_id' ) ) {
+    $pid = (int) get_queried_object_id();
+    if ( $pid > 0 ) {
+        $langs = get_post_meta( $pid, '_reeid_wc_inline_langs', true );
+        if ( is_array( $langs ) && ! empty( $langs ) ) {
+            $l = strtolower( substr( (string) $langs[0], 0, 10 ) );
+            if ( $l !== '' ) {
+                return $l;
+            }
+        }
+    }
+}
+add_filter(
+    'woocommerce_attribute_label',
+    function ( $label, $name, $product ) {
+
+        if ( is_admin() || ! $product instanceof WC_Product ) {
+            return $label;
+        }
+
+        if ( ! function_exists( 'reeid_wc_resolve_lang_strong' ) ) {
+            return $label;
+        }
+
+        $lang = reeid_wc_resolve_lang_strong();
+        if ( $lang === 'en' ) {
+            return $label;
+        }
+
+        $pid = (int) $product->get_id();
+        if ( $pid <= 0 ) {
+            return $label;
+        }
+
+        $pl = get_post_meta( $pid, '_reeid_wc_tr_' . $lang, true );
+        if ( ! is_array( $pl ) || empty( $pl['attributes'] ) ) {
+            return $label;
+        }
+
+        foreach ( $pl['attributes'] as $attr ) {
+            if (
+                ! empty( $attr['name'] )
+                && sanitize_title( $attr['name'] ) === sanitize_title( $label )
+            ) {
+                return $attr['name'];
+            }
+        }
+
+        return $label;
+    },
+    20,
+    3
+);
+
+
+
 		return 'en';
 	}
 }
@@ -186,6 +244,23 @@ if (! function_exists('reeid_wc_payload_for_lang')) {
     }
 }
 
+if ( ! function_exists( 'reeid_wc_fallback_inline_lang' ) ) {
+    function reeid_wc_fallback_inline_lang( int $product_id ): string {
+
+        $langs = get_post_meta( $product_id, '_reeid_wc_inline_langs', true );
+
+        if ( is_array( $langs ) && ! empty( $langs ) ) {
+            $l = strtolower( substr( (string) $langs[0], 0, 10 ) );
+            if ( $l !== '' ) {
+                return $l;
+            }
+        }
+
+        return 'en';
+    }
+}
+
+
 /** Runtime swaps (priority 99) */
 add_filter('woocommerce_product_get_name', function ($name, $product) {
     if (is_admin()) return $name;
@@ -193,8 +268,7 @@ add_filter('woocommerce_product_get_name', function ($name, $product) {
     try {
         $pid  = (int) $product->get_id();
         $lang = reeid_wc_resolve_lang_strong();
-        $pl   = reeid_wc_payload_for_lang($pid, $lang);
-
+        $pl   = reeid_wc_payload_for_lang( $pid, $lang );
         if (! empty($pl['title'])) {
             reeid_wc_unified_log('NAME@99', ['id'=>$pid,'lang'=>$lang]);
             return (string)$pl['title'];
@@ -1030,3 +1104,66 @@ $saved_codes = [];
 	);
 
 }, 10 );
+
+
+
+
+add_filter(
+    'woocommerce_product_get_attributes',
+    function ( $attributes, $product ) {
+
+        if ( is_admin() || ! $product instanceof WC_Product ) {
+            return $attributes;
+        }
+
+        if ( ! is_singular( 'product' ) ) {
+            return $attributes;
+        }
+
+        if ( ! function_exists( 'reeid_wc_resolve_lang_strong' ) ) {
+            return $attributes;
+        }
+
+        $lang = reeid_wc_resolve_lang_strong();
+        if ( $lang === 'en' ) {
+            return $attributes;
+        }
+
+        $pid = (int) $product->get_id();
+        if ( $pid <= 0 ) {
+            return $attributes;
+        }
+
+        $pl = get_post_meta( $pid, '_reeid_wc_tr_' . $lang, true );
+        if ( ! is_array( $pl ) || empty( $pl['attributes'] ) ) {
+            return $attributes;
+        }
+
+        foreach ( $attributes as $key => $attr ) {
+
+            // ONLY custom (non-taxonomy) attributes
+            if ( $attr->is_taxonomy() ) {
+                continue;
+            }
+
+            foreach ( $pl['attributes'] as $tr ) {
+                if (
+                    ! empty( $tr['name'] )
+                    && sanitize_title( $tr['name'] ) === sanitize_title( $attr->get_name() )
+                ) {
+                    $attr->set_name( $tr['name'] );
+                }
+
+                if ( ! empty( $tr['value'] ) ) {
+                    $attr->set_options( [ $tr['value'] ] );
+                }
+            }
+
+            $attributes[ $key ] = $attr;
+        }
+
+        return $attributes;
+    },
+    20,
+    2
+);

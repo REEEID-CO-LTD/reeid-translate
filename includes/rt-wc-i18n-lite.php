@@ -1,5 +1,17 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+/**
+ * SAFETY GUARD — Disable runtime AI rewriting
+ * Translation MUST happen only at translation time.
+ */
+if ( ! defined( 'REEID_RUNTIME_TRANSLATION_DISABLED' ) ) {
+    define( 'REEID_RUNTIME_TRANSLATION_DISABLED', true );
+}
+
+
+
+
 if ( defined( 'REEID_WC_I18N_LITE_GUARD' ) ) { return; }
 define( 'REEID_WC_I18N_LITE_GUARD', true );
 
@@ -471,67 +483,6 @@ add_filter(
 
 
 
-
-
-
-/**
- * ATTRIBUTES — translate labels & values.
- * Per-product meta (preferred):
- *   _reeid_wc_attr_labels_<lang> = [ "Color" => "颜色", ... ]
- *   _reeid_wc_attr_values_<lang> = [ "Yellow blended with blue" => "黄蓝混合", ... ]
- * Global options fallback:
- *   reeid_attr_labels_<lang>,  reeid_attr_values_<lang>
- */
-add_filter('woocommerce_attribute_label', function($label, $name = '', $product = null){
-    if (!function_exists('is_product') || !is_product()) return $label;
-
-    $lang = reeid_wc_current_lang();
-    $pid  = (is_object($product) && method_exists($product,'get_id')) ? (int)$product->get_id() : (get_the_ID() ?: 0);
-
-    $map = ($pid > 0) ? get_post_meta($pid, '_reeid_wc_attr_labels_'.$lang, true) : array();
-    if (!is_array($map) || empty($map)) $map = get_option('reeid_attr_labels_'.$lang, array());
-    if (!is_array($map)) $map = array();
-
-    if (isset($map[$label]) && $map[$label] !== '') return (string)$map[$label];
-    if ($name && isset($map[$name]) && $map[$name] !== '') return (string)$map[$name];
-
-    return $label;
-}, 10, 3);
-
-add_filter('woocommerce_display_product_attributes', function($attrs, $product){
-    if (!function_exists('is_product') || !is_product()) return $attrs;
-
-    $lang = reeid_wc_current_lang();
-    $pid  = (is_object($product) && method_exists($product,'get_id')) ? (int)$product->get_id() : (get_the_ID() ?: 0);
-
-    $labelMap = ($pid > 0) ? get_post_meta($pid, '_reeid_wc_attr_labels_'.$lang, true) : array();
-    if (!is_array($labelMap) || empty($labelMap)) $labelMap = get_option('reeid_attr_labels_'.$lang, array());
-    if (!is_array($labelMap)) $labelMap = array();
-
-    $valueMap = ($pid > 0) ? get_post_meta($pid, '_reeid_wc_attr_values_'.$lang, true) : array();
-    if (!is_array($valueMap) || empty($valueMap)) $valueMap = get_option('reeid_attr_values_'.$lang, array());
-    if (!is_array($valueMap)) $valueMap = array();
-
-    foreach ($attrs as &$A) {
-        if (isset($A['label'])) {
-            $lab = wp_strip_all_tags($A['label']);
-            if (isset($labelMap[$lab]) && $labelMap[$lab] !== '') {
-                $A['label'] = esc_html($labelMap[$lab]);
-            } elseif (isset($labelMap[$A['label']])) {
-                $A['label'] = esc_html($labelMap[$A['label']]);
-            }
-        }
-        if (isset($A['value']) && $A['value'] !== '') {
-            $plain = trim(wp_strip_all_tags($A['value']));
-            if ($plain !== '' && isset($valueMap[$plain]) && $valueMap[$plain] !== '') {
-                $A['value'] = esc_html($valueMap[$plain]);
-            }
-        }
-    }
-    unset($A);
-    return $attrs;
-}, 10, 2);
-
 /** Available languages for a product (from indexes; ensure 'en' fallback). */
 if (!function_exists('reeid_wc_available_langs')) {
     function reeid_wc_available_langs($product_id){
@@ -691,44 +642,7 @@ add_filter('woocommerce_product_get_attributes', function($attributes, $product)
     return $attributes;
 }, 9, 2);
 
-/**
- * REEID: Force-last attribute translation (runs after other filters).
- * Ensures labels/values are in the target language before HTML is generated.
- */
-add_filter('woocommerce_display_product_attributes', function($attrs, $product){
-    if (!function_exists('is_product') || !is_product()) return $attrs;
 
-    $lang = reeid_wc_current_lang();
-    $pid  = (is_object($product) && method_exists($product,'get_id')) ? (int)$product->get_id() : (get_the_ID() ?: 0);
-
-    // Load per-product maps, fall back to global options
-    $labelMap = ($pid>0) ? get_post_meta($pid, '_reeid_wc_attr_labels_'.$lang, true) : array();
-    if (!is_array($labelMap) || empty($labelMap)) $labelMap = get_option('reeid_attr_labels_'.$lang, array());
-    if (!is_array($labelMap)) $labelMap = array();
-
-    $valueMap = ($pid>0) ? get_post_meta($pid, '_reeid_wc_attr_values_'.$lang, true) : array();
-    if (!is_array($valueMap) || empty($valueMap)) $valueMap = get_option('reeid_attr_values_'.$lang, array());
-    if (!is_array($valueMap)) $valueMap = array();
-
-    foreach ($attrs as &$A) {
-        // Label fix (exact match only)
-        if (isset($A['label'])) {
-            $lab = wp_strip_all_tags($A['label']);
-            if ($lab !== '' && isset($labelMap[$lab]) && $labelMap[$lab] !== '') {
-                $A['label'] = esc_html($labelMap[$lab]);
-            }
-        }
-        // Value fix (exact match on plain text)
-        if (isset($A['value']) && $A['value'] !== '') {
-            $plain = trim(wp_strip_all_tags($A['value']));
-            if ($plain !== '' && isset($valueMap[$plain]) && $valueMap[$plain] !== '') {
-                $A['value'] = esc_html($valueMap[$plain]);
-            }
-        }
-    }
-    unset($A);
-    return $attrs;
-}, 999, 2);
 
 /** =========================================================
  * REEID: force-last Woo Attributes translator (prio 999)
@@ -742,6 +656,7 @@ if (!defined('REEID_WC_ATTR_FORCE_LAST')) { define('REEID_WC_ATTR_FORCE_LAST', 1
 
 if (!function_exists('reeid_wc__attr_force_last_hook')) {
     function reeid_wc__attr_force_last_hook($attrs, $product){
+        
         if (!function_exists('is_product') || !is_product()) return $attrs;
 
         $lang = function_exists('reeid_wc_current_lang') ? (string) reeid_wc_current_lang() : 'en';
@@ -780,19 +695,64 @@ if (!defined('REEID_WC_ATTR_DEEPEST')) { define('REEID_WC_ATTR_DEEPEST', 1); }
 /* Label translator: wc_attribute_label() -> 'woocommerce_attribute_label' */
 if (!function_exists('reeid_wc__attr_label_filter')) {
     function reeid_wc__attr_label_filter($label, $name = '', $product = null){
-        if (function_exists('is_product') && !is_product()) return $label;
+        // 🔒 GUARD — FIRST EXECUTED CODE
+    $pid = is_object( $product ) && method_exists( $product, 'get_id' )
+        ? (int) $product->get_id()
+        : get_queried_object_id();
+
+    if ( $pid > 0 ) {
         $lang = reeid_wc__current_lang_safe();
-        $src  = wp_strip_all_tags((string)$label);
-        if ($src === '') return $label;
-        $out  = $src;
+        $pl   = function_exists( 'reeid_wc_payload_for_lang' )
+            ? reeid_wc_payload_for_lang( $pid, $lang )
+            : [];
+
+        if ( empty( $pl['attributes'] ) ) {
+            return $label;
+        }
+    }
+
+        if (function_exists('is_product') && !is_product()) {
+            return $label;
+        }
+
+        // Resolve language
+        $lang = reeid_wc__current_lang_safe();
+        if (
+            ! function_exists('reeid_is_allowed_lang')
+            || ! reeid_is_allowed_lang($lang)
+        ) {
+            $lang = 'en';
+        }
+
+        // 🔒 CRITICAL GUARD:
+        // If this language has NO attribute payload, do NOT use legacy translator
+        $pid = $product instanceof WC_Product ? (int) $product->get_id() : 0;
+        if ($pid > 0) {
+            $pl = get_post_meta($pid, '_reeid_wc_tr_' . $lang, true);
+            if (!is_array($pl) || empty($pl['attributes'])) {
+                return $label;
+            }
+        }
+
+        $src = wp_strip_all_tags((string) $label);
+        if ($src === '') {
+            return $label;
+        }
+
+        $out = $src;
         if (function_exists('reeid_wc__translate_scalar')) {
             $t = reeid_wc__translate_scalar($src, $lang, 'attr_label');
-            if (is_string($t) && $t !== '') $out = $t;
+            if (is_string($t) && $t !== '') {
+                $out = $t;
+            }
         }
+
         return esc_html($out);
     }
+
     add_filter('woocommerce_attribute_label', 'reeid_wc__attr_label_filter', 999, 3);
 }
+
 
 /* Value translator: inside wc_display_product_attributes() -> 'woocommerce_attribute' */
 if (!function_exists('reeid_wc__attr_value_filter')) {
@@ -858,7 +818,13 @@ if (!function_exists('reeid_wc__attrs_html_pass')) {
             return $content;
         }
 
-        $lang = reeid_wc__current_lang_safe();
+$lang = reeid_wc__current_lang_safe();
+if (
+    ! function_exists( 'reeid_is_allowed_lang' )
+    || ! reeid_is_allowed_lang( $lang )
+) {
+    $lang = 'en';
+}
 
         
 
@@ -937,28 +903,6 @@ if (!function_exists('reeid_wc__attrs_html_pass')) {
 if (!defined('REEID_WC_ATTR_DEBUG')) { define('REEID_WC_ATTR_DEBUG', 1); }
 
 
-/* wrap the scalar translator */
-
-
-/* re-hook our deepest filters to log */
-if (function_exists('remove_filter')) {
-    remove_filter('woocommerce_attribute_label','reeid_wc__attr_label_filter', 999);
-    remove_filter('woocommerce_attribute','reeid_wc__attr_value_filter', 999);
-}
-
-
-/** REEID: strong language resolver for WC attrs (query > plugin > cookie > en) */
-
-/** REEID: attrs trace to uploads log (temporary) */
-
-
-
-
-/* Re-hook value/label filters with tracing (and highest prio) */
-if (function_exists('remove_filter')) {
-    remove_filter('woocommerce_attribute_label','reeid_wc__attr_label_filter', 999);
-    remove_filter('woocommerce_attribute','reeid_wc__attr_value_filter', 999);
-}
 
 
 /** =========================================================
@@ -1089,7 +1033,13 @@ if (!function_exists('reeid_wc__ai_tab_wrapper')) {
             }
             $html = (string) ob_get_clean();
 
-            $lang = reeid_wc__current_lang_safe();
+$lang = reeid_wc__current_lang_safe();
+if (
+    ! function_exists( 'reeid_is_allowed_lang' )
+    || ! reeid_is_allowed_lang( $lang )
+) {
+    $lang = 'en';
+}
 
             // Try DOM first
             $processed = false;
