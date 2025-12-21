@@ -69,7 +69,7 @@ require_once __DIR__ . '/includes/wc-inline-bridge.php';
 require_once __DIR__ . '/includes/frontend-switcher.php';
 require_once __DIR__ . '/includes/admin-columns.php';
 //require_once __DIR__ . '/includes/routing-prequery.php';
-//require_once __DIR__ . '/includes/routing-langcookie.php';
+require_once __DIR__ . '/includes/routing-langcookie.php';
 //require_once __DIR__ . '/includes/routing-core.php';
 //require_once __DIR__ . '/includes/guard-template-redirect.php';
 require_once __DIR__ . '/includes/guard-hreflang-wp-head.php';
