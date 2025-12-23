@@ -59,11 +59,11 @@ require_once __DIR__ . '/includes/gutenberg-engine.php';
 
 require_once __DIR__ . '/includes/woo-helpers.php';
 require_once __DIR__ . '/includes/reeid-wc-inline-title-short.php';
-require_once __DIR__ . '/includes/rt-wc-i18n-lite.php';
+//require_once __DIR__ . '/includes/rt-wc-i18n-lite.php';
 require_once __DIR__ . '/includes/wc-inline-runtime.php';
 require_once __DIR__ . '/includes/wc-admin-switcher-guard.php';
 require_once __DIR__ . '/includes/wc-gettext.php';
-require_once __DIR__ . '/includes/rt-wc-attrs-auto.php';
+//require_once __DIR__ . '/includes/rt-wc-attrs-auto.php';
 require_once __DIR__ . '/includes/wc-inline-bridge.php';
 
 require_once __DIR__ . '/includes/frontend-switcher.php';
@@ -75,6 +75,14 @@ require_once __DIR__ . '/includes/routing-langcookie.php';
 require_once __DIR__ . '/includes/guard-hreflang-wp-head.php';
 require_once __DIR__ . '/includes/wc-lang-rewrites.php';
 require_once __DIR__ . '/includes/wc-inline-canonical-redirect.php';
+require_once __DIR__ . '/includes/wc-attributes-runtime.php';
+require_once __DIR__ . '/includes/wc-lang-runtime.php';
+require_once __DIR__ . '/includes/wc-attribute-label-runtime.php';
+require_once __DIR__ . '/includes/wc-native-slug-runtime.php';
+require_once __DIR__ . '/includes/debug-lang-trace.php'; //temporary
+
+
+
 
 
 

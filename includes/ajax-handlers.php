@@ -113,10 +113,7 @@ add_action('wp_ajax_reeid_translate_openai', 'reeid_handle_ajax_translation');
 if (! function_exists('reeid_handle_ajax_translation')) {
     function reeid_handle_ajax_translation(){
     
-   /* ============================
-   SECURE AJAX HANDLER START
-   Nonce + Sanitized Inputs
-===============================*/
+   
 
 // Validate security nonce first
 if (
@@ -178,17 +175,6 @@ $system_prompt = function_exists( 'reeid_get_combined_prompt' )
 
 // Keep legacy $prompt var
 $prompt = $system_prompt;
-
-/* >>> INJECTION END <<< */
-
-// TEMP DEBUG LOGGING REMOVED FOR WP.ORG COMPLIANCE
-// (file_put_contents + raw POST dumps not allowed in repo)
-
-/* ============================
-   SECURE AJAX BLOCK END
-===============================*/
-
-
 
 
 
@@ -306,6 +292,32 @@ $prompt = $system_prompt;
             }
             // === End collect attributes ===
 
+// ======================================================
+// REEID: persist translated attributes per language
+// ======================================================
+if (!empty($attributes) && is_array($attributes)) {
+
+    $meta_key = '_reeid_wc_tr_' . strtolower($target_lang);
+    $payload  = get_post_meta($src_id, $meta_key, true);
+
+    if (!is_array($payload)) {
+        $payload = [];
+    }
+
+    $payload['attributes'] = [];
+
+    foreach ($attributes as $label => $value) {
+        $payload['attributes'][] = [
+            'label' => (string) $label,
+            'value' => (string) $value,
+        ];
+    }
+
+    update_post_meta($src_id, $meta_key, $payload);
+}
+
+
+
             // Preferred: bulk map translator if available (bypasses extractor entirely)
             if (function_exists('reeid_translate_map_via_openai')) {
                 $in = [
@@ -316,6 +328,8 @@ $prompt = $system_prompt;
                     'attributes' => $attributes, // <-- Now included
                 ];
                 $out = (array) reeid_translate_map_via_openai($in, $target_lang, $ctx);
+                error_log('[REEID ATTR DEBUG] translate_map_via_openai OUT: ' . print_r($out, true));
+
                 $title   = is_string($out['title']   ?? '') ? $out['title']   : $title;
                 $excerpt = is_string($out['excerpt'] ?? '') ? $out['excerpt'] : $excerpt;
                 $content = is_string($out['content'] ?? '') ? $out['content'] : $content;
@@ -448,21 +462,45 @@ update_post_meta($__reeid_inject_target, '_elementor_data', $json);
                 }
 
                 if (!empty($attributes) && function_exists('reeid_translate_html_with_openai')) {
-                    foreach ($attributes as $attr_key => $attr_val) {
-                        // Pass RAW $prompt; the helper merges with Global Instructions internally
-                        $translated = (string) reeid_translate_html_with_openai(
-                            $attr_val,
-                            $src_lang,
-                            $target_lang,
-                            $editor,
-                            $tone,
-                            $prompt
-                        );
-                        if ($translated !== '') {
-                            $attributes[$attr_key] = $translated;
-                        }
-                    }
-                }
+
+    $attributes_tr = [];
+
+    foreach ($attributes as $attr_name => $attr_val) {
+
+        // Translate ATTRIBUTE NAME (label)
+        $name_tr = (string) reeid_translate_html_with_openai(
+            $attr_name,
+            $src_lang,
+            $target_lang,
+            $editor,
+            $tone,
+            $prompt
+        );
+        if ($name_tr === '') {
+            $name_tr = $attr_name;
+        }
+
+        // Translate ATTRIBUTE VALUE
+        $value_tr = (string) reeid_translate_html_with_openai(
+            $attr_val,
+            $src_lang,
+            $target_lang,
+            $editor,
+            $tone,
+            $prompt
+        );
+        if ($value_tr === '') {
+            $value_tr = $attr_val;
+        }
+
+        // Store translated label + value
+        $attributes_tr[$name_tr] = $value_tr;
+    }
+
+    // Replace original attributes with translated set
+    $attributes = $attributes_tr;
+}
+
             }
 
             // Store inline translation (no new product post) — ALWAYS on src_id
@@ -485,38 +523,26 @@ update_post_meta($__reeid_inject_target, '_elementor_data', $json);
                 'editor'     => $editor,
                 'attributes' => $attributes, // Save translated attributes to meta
             ];
+           error_log('[REEID TRACE] BEFORE STORE lang=' . $target_lang);
+error_log('[REEID TRACE] payload keys=' . implode(',', array_keys($payload)));
+error_log('[REEID TRACE] attributes isset=' . (isset($payload['attributes']) ? 'YES' : 'NO'));
+error_log('[REEID TRACE] attributes type=' . gettype($payload['attributes'] ?? null));
+error_log('[REEID TRACE] attributes value=' . json_encode($payload['attributes'] ?? null));
+
+
             $ok = reeid_wc_store_translation_meta($src_id, $target_lang, $payload);
 
-            if (
-                get_post_type($post_id) === 'product' &&
-                class_exists('WC_Product') &&
-                function_exists('reeid_translate_product_attributes')
-            ) {
-                $src_product = wc_get_product($src_id);      // Always original English product
-                $dst_product = wc_get_product($src_id);      // Inline mode points to same product
 
-                if ($src_product && $dst_product) {
-                    if (empty($tone)) $tone = 'neutral';
-                    // Attribute translation call:
-                    reeid_translate_product_attributes($src_product, $dst_product, $src_lang, $target_lang, $tone);
-                    // Always save the product to commit attribute changes
-                    if (method_exists($dst_product, 'save')) {
-                        $dst_product->save();
-                    }
-                    if (function_exists('reeid_debug_log')) {
-                        $after = wc_get_product($src_id);
-                        reeid_debug_log('WC ATTR SINGLE TRANSLATE: After', [
-                            'dst_attrs' => $after ? $after->get_attributes() : []
-                        ]);
-                    }
-                }
-            }
+           
 
             // Update map on the cluster root to point this language to the same product (inline mode)
             $map      = (array) get_post_meta($src_id, '_reeid_translation_map', true);
             $map[$src_lang]    = $src_id;
             $map[$target_lang] = $src_id;
             update_post_meta($src_id, '_reeid_translation_map', $map);
+
+            
+
 
             if (function_exists('reeid_debug_log')) {
                 reeid_debug_log('S18/WC INLINE STORED', [
@@ -927,6 +953,7 @@ update_post_meta($target_id, '_reeid_translation_lang', $target_lang);
 update_post_meta($target_id, '_reeid_translation_source', $src_id);
 $map[$target_lang] = $target_id;
 update_post_meta($src_id, '_reeid_translation_map', $map);
+
 
 if (function_exists('reeid_clone_seo_meta')) {
     reeid_clone_seo_meta($src_id, $target_id, $target_lang);

@@ -23,13 +23,17 @@ if (!function_exists('reeid_wc_store_translation_meta')) {
 
         // sanitize minimal payload
         $pl = array(
-            'title'   => (string) ($payload['title']   ?? ''),
-            'content' => (string) ($payload['content'] ?? ''),
-            'excerpt' => (string) ($payload['excerpt'] ?? ''),
-            'slug'    => (string) ($payload['slug']    ?? ''),
-            'updated' => (string) ($payload['updated'] ?? gmdate('c')),
-            'editor'  => (string) ($payload['editor']  ?? ''),
-        );
+    'title'      => (string) ($payload['title']   ?? ''),
+    'content'    => (string) ($payload['content'] ?? ''),
+    'excerpt'    => (string) ($payload['excerpt'] ?? ''),
+    'slug'       => (string) ($payload['slug']    ?? ''),
+    'updated'    => (string) ($payload['updated'] ?? gmdate('c')),
+    'editor'     => (string) ($payload['editor']  ?? ''),
+    'attributes' => (is_array($payload['attributes'] ?? null))
+        ? $payload['attributes']
+        : [],
+);
+
 
         // 1) Store per-language blob under _reeid_wc_tr_<lang>
         $key = '_reeid_wc_tr_' . $lang;

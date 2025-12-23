@@ -1,6 +1,11 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
+
+
+
+
+
 /**
  * SAFETY GUARD — Disable runtime AI rewriting
  * Translation MUST happen only at translation time.

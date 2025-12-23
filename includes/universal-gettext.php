@@ -11,6 +11,15 @@
 add_filter('gettext', 'reeid_universal_translate', 20, 3);
 function reeid_universal_translate($translated, $original, $domain) {
 
+    // HARD GUARD: never translate WooCommerce strings on single product pages
+    if (
+        $domain === 'woocommerce' &&
+        function_exists('is_product') &&
+        is_product()
+    ) {
+        return $translated;
+    }
+
     // Detect current language (REEID EL / WC / cookie)
     $lang = function_exists('reeid_wc_get_lang') ? reeid_wc_get_lang() : '';
     if (!$lang) {

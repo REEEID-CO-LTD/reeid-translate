@@ -1,64 +1,69 @@
 <?php
-if ( ! defined( 'ABSPATH' ) ) {
-    exit;
-}
-
 /**
  * REEID — Language prefix root + Woo product routing
  *
  * Enables:
  *   /{lang}/product/{slug}
  *
- * Safe:
+ * SAFE:
  * - rewrite rules only
- * - no redirects
- * - no template_redirect
- * - WP-repo compliant
+ * - parse_request resolver
+ * - NO redirects
+ * - NO template_redirect
+ * - NO canonical logic
  */
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
+/* ------------------------------------------------------------
+ * INIT — rewrites + query vars
+ * ------------------------------------------------------------ */
 add_action( 'init', function () {
 
-    // Register language query var
+    // Query vars
     add_filter( 'query_vars', function ( $vars ) {
         $vars[] = 'reeid_lang';
+        $vars[] = 'reeid_slug';
         return $vars;
     } );
 
-    // Register language root so WP accepts /pl/ as valid
+    // /{lang}/
     add_rewrite_rule(
         '^([a-z]{2}(?:-[a-zA-Z0-9]{2,8})?)/?$',
         'index.php?reeid_lang=$matches[1]',
         'top'
     );
 
-    // Language-prefixed Woo product
+    // /{lang}/product/{slug}
     add_rewrite_rule(
-        '^([a-z]{2}(?:-[a-zA-Z0-9]{2,8})?)/product/([^/]+)/?$',
-        'index.php?post_type=product&name=$matches[2]&reeid_lang=$matches[1]',
+        '^([a-z]{2}(?:-[a-zA-Z0-9]{2,8})?)/product/(.+)/?$',
+        'index.php?post_type=product&reeid_lang=$matches[1]&reeid_slug=$matches[2]',
         'top'
     );
 
 }, 0 );
-/**
- * Resolve language-prefixed Woo products to a concrete post ID.
- * Supports native UTF-8 and sanitized Latin slugs.
- */
+
+/* ------------------------------------------------------------
+ * PARSE REQUEST — resolve product by slug
+ * ------------------------------------------------------------ */
 add_action( 'parse_request', function ( $wp ) {
 
     if ( empty( $wp->query_vars['reeid_lang'] ) ) {
         return;
     }
 
-    if ( empty( $wp->query_vars['name'] ) ) {
+    if ( empty( $wp->query_vars['reeid_slug'] ) ) {
         return;
     }
 
-    $raw = rawurldecode( $wp->query_vars['name'] );
+    $raw = rawurldecode( (string) $wp->query_vars['reeid_slug'] );
 
-    // 1) Try native UTF-8 slug
+    // 1) Native UTF-8 slug
     $post = get_page_by_path( $raw, OBJECT, 'product' );
 
-    // 2) Fallback: sanitized (Latin accents)
+    // 2) Sanitized fallback
     if ( ! $post ) {
         $san = sanitize_title( $raw );
         if ( $san !== $raw ) {
@@ -66,12 +71,15 @@ add_action( 'parse_request', function ( $wp ) {
         }
     }
 
-    if ( $post ) {
-        // Hand WP a concrete ID — this avoids all slug ambiguity
-        $wp->query_vars = array(
-            'post_type' => 'product',
-            'p'         => (int) $post->ID,
-        );
+    if ( ! $post ) {
+        return;
     }
+
+    // Force exact post ID — prevents WP canonical redirect
+    $wp->query_vars = array(
+        'post_type' => 'product',
+        'p'         => (int) $post->ID,
+        'reeid_lang'=> sanitize_key( $wp->query_vars['reeid_lang'] ),
+    );
 
 }, 1 );
